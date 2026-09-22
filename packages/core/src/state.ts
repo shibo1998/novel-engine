@@ -32,7 +32,12 @@ function extractTitle(text: string): string {
   return line.replace(/^#+\s*/, '').replace(/^第[0-9零一二三四五六七八九十百千两]+章\s*/, '').trim();
 }
 
-/** 字数口径：整个文件去掉全部空白字符后的码点数（不用 str.length，避免 emoji 按 UTF-16 码元算成两个） */
+/**
+ * 字数口径（全项目唯一口径，Python 工具与 Web 端照抄，不得再发明第二个）：
+ * 整个文件去掉全部空白字符后的码点数。
+ * 跨语言一致性已核实：JS 的 \s 与 Python re 的 \s 在 Unicode 模式下都吃全角空格 \u3000；
+ * [...s].length 与 len(s) 同为码点计数（不用 str.length，避免 emoji 按 UTF-16 码元算成两个）。
+ */
 function countWords(text: string): number {
   return [...text.replace(/\s/g, '')].length;
 }
@@ -78,7 +83,9 @@ async function rebuildState(bookRoot: string): Promise<StoryState> {
  *  3. bookRoot 不是目录 → throw
  */
 export async function readState(opts: ReadStateOptions): Promise<StoryState> {
-  const root = opts.bookRoot;
+  // 归一：绝对化 + 分隔符统一为平台形式。所有拼 state 路径、bookRoot 比较、落盘一律用 root。
+  // 不归一大小写（d:/ vs D:/ 仍不等，实践中无人混敲）。
+  const root = path.resolve(opts.bookRoot);
   const st = await stat(root).catch(() => null);
   if (st === null || !st.isDirectory()) {
     throw new Error(`readState：bookRoot 不是目录：${root}`);
@@ -103,10 +110,13 @@ export async function readState(opts: ReadStateOptions): Promise<StoryState> {
  * 写前归一：chapters 按 chapterNo 升序，generatedAt 刷新。
  */
 export async function writeState(state: StoryState): Promise<void> {
-  const dir = path.join(state.bookRoot, 'state');
+  // 入口同样归一（见 readState），且落盘的 bookRoot 用归一后的值，保证跨层字符串相等
+  const root = path.resolve(state.bookRoot);
+  const dir = path.join(root, 'state');
   await mkdir(dir, { recursive: true });
   const normalized: StoryState = {
     ...state,
+    bookRoot: root,
     chapters: [...state.chapters].sort((a, b) => a.chapterNo - b.chapterNo),
     generatedAt: new Date().toISOString(),
   };
