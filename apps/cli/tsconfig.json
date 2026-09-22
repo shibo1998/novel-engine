@@ -1,5 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["src"],
-  "references": [{ "path": "../../packages/core" }]
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {
+      "@novel/core": ["../core/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
 }

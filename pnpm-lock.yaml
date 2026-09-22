@@ -26,6 +26,16 @@ importers:
       '@novel/core':
         specifier: workspace:*
         version: link:../../packages/core
+      commander:
+        specifier: ^15.0.0
+        version: 15.0.0
+    devDependencies:
+      '@types/node':
+        specifier: '20'
+        version: 20.19.43
+      typescript:
+        specifier: '5'
+        version: 5.9.3
 
   packages/core:
     devDependencies:
@@ -197,6 +207,10 @@ packages:
   '@types/node@20.19.43':
     resolution: {integrity: sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==}
 
+  commander@15.0.0:
+    resolution: {integrity: sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==}
+    engines: {node: '>=22.12.0'}
+
   esbuild@0.28.2:
     resolution: {integrity: sha512-HKVLS8dvII+xoKW9kmqxbRKrnWEXfJJr/FZhhJmiqIB0e053QNYFqOBouTMO/k5sID4MvCiUCvv8b9M4h32wIA==}
     engines: {node: '>=18'}
@@ -306,6 +320,8 @@ snapshots:
   '@types/node@20.19.43':
     dependencies:
       undici-types: 6.21.0
+
+  commander@15.0.0: {}
 
   esbuild@0.28.2:
     optionalDependencies:
