@@ -48,7 +48,7 @@ description: 'Enforce Chinese punctuation and typography standards in prose. Two
 ## 写正文的流程
 
 1. 按上面的规范写。
-2. 如果正文写入了文件，跑 `python3 scripts/fix_punctuation.py --check 文件` 兜底，有 diff 就修复（Windows 无 Python 时用 PowerShell 版，见「修复现有文档的流程」）。
+2. 如果正文写入了文件，跑 `python3 tools/fix_punctuation.py --check 文件` 兜底，有 diff 就修复（Windows 无 Python 时用 PowerShell 版，见「修复现有文档的流程」）。
 3. 按文末「复查」清单自查一遍再交付；没写入文件的正文直接对照清单通读自查。
 
 ## 修复现有文档的流程
@@ -56,15 +56,15 @@ description: 'Enforce Chinese punctuation and typography standards in prose. Two
 ### 第一步：先检查，看修改规模
 
 ```bash
-python3 scripts/fix_punctuation.py --check 文件1.md 文件2.md
+python3 tools/fix_punctuation.py --check 文件1.md 文件2.md
 ```
 
-输出 diff 和各类问题数量，不写回。文件多时可配合 glob：`python3 scripts/fix_punctuation.py --check 目录/*.md`。
+输出 diff 和各类问题数量，不写回。文件多时可配合 glob：`python3 tools/fix_punctuation.py --check 目录/*.md`。
 
 ### 第二步：批量修复
 
 ```bash
-python3 scripts/fix_punctuation.py 文件...
+python3 tools/fix_punctuation.py 文件...
 ```
 
 就地修改。如果用户同时要求清理正文里的加粗/斜体/分节符，加 `--strip-markdown`（会删除 `**` `*` 标记和 `---` 行，先跟用户确认这是正文而不是需要保留格式的文档）。
@@ -74,9 +74,9 @@ python3 scripts/fix_punctuation.py 文件...
 **Windows 无 Python 环境**：改用系统自带的 PowerShell 跑等价脚本 `fix_punctuation.ps1`，行为与 Python 版一致（`-Check` 输出逐行改动而非 diff）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/fix_punctuation.ps1 -Check 文件...
-powershell -ExecutionPolicy Bypass -File scripts/fix_punctuation.ps1 文件...
-powershell -ExecutionPolicy Bypass -File scripts/fix_punctuation.ps1 -StripMarkdown 文件...
+powershell -ExecutionPolicy Bypass -File tools/fix_punctuation.ps1 -Check 文件...
+powershell -ExecutionPolicy Bypass -File tools/fix_punctuation.ps1 文件...
+powershell -ExecutionPolicy Bypass -File tools/fix_punctuation.ps1 -StripMarkdown 文件...
 ```
 
 ### 第三步：复查

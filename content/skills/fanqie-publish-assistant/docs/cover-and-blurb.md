@@ -65,7 +65,7 @@
 | 内容元素 | 贴合作品题材与基调 |
 | 画风 | 有设计感和艺术性，不是随便贴字 |
 
-**出图不能直接传 600×800**——多数出图模型要求长宽是 16 的倍数，600 不是。做法：用 **768×1024** 出图（3:4，两边都能被 16 整除），再用 `scripts/make_cover.py` 缩到 600×800 并压到 5MB 以内。
+**出图不能直接传 600×800**——多数出图模型要求长宽是 16 的倍数，600 不是。做法：用 **768×1024** 出图（3:4，两边都能被 16 整除），再用 `tools/make_cover.py` 缩到 600×800 并压到 5MB 以内。
 
 ## 红线（出图前自查）
 
@@ -115,11 +115,11 @@ Negative: no extra text, no watermark, no QR code, no garbled characters, no ext
 ## 缩到番茄规格
 
 ```bash
-python3 scripts/make_cover.py covers/原图.png --out "covers/书名-封面.jpg"
+python3 tools/make_cover.py covers/原图.png --out "covers/书名-封面.jpg"
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\make_cover.ps1 covers\原图.png -Out "covers\书名-封面.jpg"
+powershell -ExecutionPolicy Bypass -File tools\make_cover.ps1 covers\原图.png -Out "covers\书名-封面.jpg"
 ```
 
 按 3:4 居中裁剪后缩放到 600×800，jpg 自动降质直到 ≤5MB。需要 png 时加 `--format png` / `-Format png`。

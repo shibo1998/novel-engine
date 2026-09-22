@@ -1,6 +1,6 @@
 # 中文标点规范（正文强制）
 
-`scripts/fix_punctuation.py` 已在导出流程中自动执行第 1–4 条的机械部分。本文档用于第三步复查，以及作者手改时对照。
+`tools/fix_punctuation.py` 已在导出流程中自动执行第 1–4 条的机械部分。本文档用于第三步复查，以及作者手改时对照。
 
 ## 1. 引号必须使用方向性字符
 
@@ -58,11 +58,11 @@
 ## 8. 复查后重跑
 
 ```bash
-python3 scripts/export_fanqie_txt.py 正文目录/ --book "书名" --check
+python3 tools/export_fanqie_txt.py 正文目录/ --book "书名" --check
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\export_fanqie_txt.ps1 -Book "书名" -Check 正文目录\
+powershell -ExecutionPolicy Bypass -File tools\export_fanqie_txt.ps1 -Book "书名" -Check 正文目录\
 ```
 
 退出码 0 表示自检项全部干净。
@@ -70,11 +70,11 @@ powershell -ExecutionPolicy Bypass -File scripts\export_fanqie_txt.ps1 -Book "�
 只想单独修标点、不导出 txt 时，用标点脚本本身：
 
 ```bash
-python3 scripts/fix_punctuation.py --check 文件...    # 看改动
-python3 scripts/fix_punctuation.py 文件...            # 就地修复
+python3 tools/fix_punctuation.py --check 文件...    # 看改动
+python3 tools/fix_punctuation.py 文件...            # 就地修复
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\fix_punctuation.ps1 -Check 文件...
-powershell -ExecutionPolicy Bypass -File scripts\fix_punctuation.ps1 文件...
+powershell -ExecutionPolicy Bypass -File tools\fix_punctuation.ps1 -Check 文件...
+powershell -ExecutionPolicy Bypass -File tools\fix_punctuation.ps1 文件...
 ```

@@ -41,24 +41,24 @@
 
 ```bash
 # Python：自检，不写文件
-python3 scripts/export_fanqie_txt.py 正文目录/ --book "书名" --check
+python3 tools/export_fanqie_txt.py 正文目录/ --book "书名" --check
 
 # Python：正式导出（默认整本 + 分章 + 上传清单）
-python3 scripts/export_fanqie_txt.py 正文目录/ --book "书名" --out fanqie
+python3 tools/export_fanqie_txt.py 正文目录/ --book "书名" --out fanqie
 
 # Python：指定多个文件，按给定顺序处理
-python3 scripts/export_fanqie_txt.py 第1章.md 第2章.md --book "书名"
+python3 tools/export_fanqie_txt.py 第1章.md 第2章.md --book "书名"
 ```
 
 ```powershell
 # PowerShell：自检，不写文件
-powershell -ExecutionPolicy Bypass -File scripts\export_fanqie_txt.ps1 -Book "书名" -Check 正文目录\
+powershell -ExecutionPolicy Bypass -File tools\export_fanqie_txt.ps1 -Book "书名" -Check 正文目录\
 
 # PowerShell：正式导出
-powershell -ExecutionPolicy Bypass -File scripts\export_fanqie_txt.ps1 -Book "书名" -Out fanqie 正文目录\
+powershell -ExecutionPolicy Bypass -File tools\export_fanqie_txt.ps1 -Book "书名" -Out fanqie 正文目录\
 
 # PowerShell：指定多个文件
-powershell -ExecutionPolicy Bypass -File scripts\export_fanqie_txt.ps1 -Book "书名" 第1章.md 第2章.md
+powershell -ExecutionPolicy Bypass -File tools\export_fanqie_txt.ps1 -Book "书名" 第1章.md 第2章.md
 ```
 
 参数：

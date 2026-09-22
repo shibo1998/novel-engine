@@ -53,22 +53,22 @@ description: 'Prepare a Chinese web novel in the SoloEnt (灵蟹) workspace for 
 
 ```bash
 # Python
-python3 scripts/export_fanqie_txt.py 正文目录/ --book "书名" --out fanqie
+python3 tools/export_fanqie_txt.py 正文目录/ --book "书名" --out fanqie
 ```
 
 ```powershell
 # Windows PowerShell（等价）
-powershell -ExecutionPolicy Bypass -File scripts\export_fanqie_txt.ps1 -Book "书名" -Out fanqie 正文目录\
+powershell -ExecutionPolicy Bypass -File tools\export_fanqie_txt.ps1 -Book "书名" -Out fanqie 正文目录\
 ```
 
 先跑一次自检看结果再正式导出，是更稳的做法：
 
 ```bash
-python3 scripts/export_fanqie_txt.py 正文目录/ --book "书名" --check
+python3 tools/export_fanqie_txt.py 正文目录/ --book "书名" --check
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\export_fanqie_txt.ps1 -Book "书名" -Check 正文目录\
+powershell -ExecutionPolicy Bypass -File tools\export_fanqie_txt.ps1 -Book "书名" -Check 正文目录\
 ```
 
 常用参数（PowerShell 版把 `--xxx-yyy` 写成 `-XxxYyy`）：
@@ -148,11 +148,11 @@ powershell -ExecutionPolicy Bypass -File scripts\export_fanqie_txt.ps1 -Book "�
 3. 压成番茄规格：
 
 ```bash
-python3 scripts/make_cover.py covers/原图.png --out "covers/书名-封面.jpg"
+python3 tools/make_cover.py covers/原图.png --out "covers/书名-封面.jpg"
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\make_cover.ps1 covers\原图.png -Out "covers\书名-封面.jpg"
+powershell -ExecutionPolicy Bypass -File tools\make_cover.ps1 covers\原图.png -Out "covers\书名-封面.jpg"
 ```
 
 脚本按 3:4 居中裁剪后缩放到 600×800，自动降质直到 ≤5MB。PowerShell 版用 Windows 自带的 System.Drawing，若报错提示加载不了，让作者改用「Windows PowerShell 5.1」运行。

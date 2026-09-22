@@ -76,11 +76,11 @@ description: "生成「热梗周报」：盘点抖音 + B站 评论区 / 弹幕�
 默认本周一 00:00 ~ 本周日 22:00（GMT+8），可按需拉长：
 
 ```bash
-python scripts/week_window.py                 # 默认：本周窗口
-python scripts/week_window.py --weeks 4        # 拉长到最近 4 周
-python scripts/week_window.py --start YYYY-MM-DD --end YYYY-MM-DD   # 任意起止
-python scripts/week_window.py YYYY-MM-DD       # 以指定日期所在周为准
-python scripts/week_window.py --month          # 输出当前年月（如「2026年8月」）——检索词动态填入用
+python tools/week_window.py                 # 默认：本周窗口
+python tools/week_window.py --weeks 4        # 拉长到最近 4 周
+python tools/week_window.py --start YYYY-MM-DD --end YYYY-MM-DD   # 任意起止
+python tools/week_window.py YYYY-MM-DD       # 以指定日期所在周为准
+python tools/week_window.py --month          # 输出当前年月（如「2026年8月」）——检索词动态填入用
 ```
 
 - **关键认知**：时间窗只是「报告覆盖范围」，不是「首发时间过滤器」——几个月前首发、现在评论区还在玩的活梗照收，来龙去脉注明真实首发时间即可。
@@ -129,7 +129,7 @@ python scripts/week_window.py --month          # 输出当前年月（如「2026
    - **贴吧热议接口（实测性价比最高的硬数据源，Deep 档必打）**：`https://tieba.baidu.com/hottopic/browse/topicList`（JSON，30 条带讨论量）——一次抓取直接实锤破圈梗（实测：野生狗奶 86 万、嘉豪 65 万讨论量）；虎扑 `https://www.hupu.com/`（步行街热帖带亮 / 回复）；AcFun `https://www.acfun.cn/`（二次元 / 抽象圈，评论区弹幕活跃）。
    - 纪律：小站证据 = 阵地名 + 硬指标（浏览量 / 梗图数 / 讨论量 / 亮回复数），不拿孤例当实证；属 B 级证据一部分，不单独构成 A 级；仍要回大站找媒体引述 / 弹幕硬数据呼应。
 
-> 检索词年月一律用 `python scripts/week_window.py --month` 动态取，**禁止写死具体年月**（skill 长期用，9 月跑用 9 月）。多换关键词，覆盖「梗名」「事件」「主播名」「评论区在玩」等切入点。
+> 检索词年月一律用 `python tools/week_window.py --month` 动态取，**禁止写死具体年月**（skill 长期用，9 月跑用 9 月）。多换关键词，覆盖「梗名」「事件」「主播名」「评论区在玩」等切入点。
 
 ### Step 3 — 按规则筛选（详见 references/filtering-rules.md）
 
@@ -184,7 +184,7 @@ python scripts/week_window.py --month          # 输出当前年月（如「2026
 
 ## Resources
 
-- `scripts/week_window.py` — 算时间窗（默认本周，`--weeks` / `--start --end` / `--month`）。**可选工具**：环境有 Python 3 就用它图省事；没有就按 Step 1 手算（本周一 00:00 ~ 本周日 22:00，当前年月 = 今天所在年/月）。
+- `tools/week_window.py` — 算时间窗（默认本周，`--weeks` / `--start --end` / `--month`）。**可选工具**：环境有 Python 3 就用它图省事；没有就按 Step 1 手算（本周一 00:00 ~ 本周日 22:00，当前年月 = 今天所在年/月）。
 - `热梗库/` — 统一产出库：`热梗档案.md`（累积武器库）+ 每期周报（`热梗周报_YYYY-MM-DD.md`）。
 - `references/filtering-rules.md` — 数据源优先级（四层流水线）、评论区实证门槛、收录 / 排除标准、分级。
 - `references/output-format.md` — 三段式输出模板（速览目录双组 + 精简条目 + 字段纪律）。
