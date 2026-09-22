@@ -42,15 +42,11 @@ description: Run Wuhang's full long-form web novel pipeline—project init, boun
 
 **第零步：项目初始化**
 
-> ⚠️ **本项目不要手动建目录、不要手抄模板**——用插件的初始化脚本，一条命令建全：
+> ⚠️ **本项目不要手动建目录、不要手抄模板**——初始化流程见仓库文档 `docs/01-初始化.md`。
 >
-> ```bash
-> python "<插件>/scripts/init_book.py" --dir "<书目录绝对路径>" \
->     --title "书名" --genre "题材" --platform "平台" --tags urban,system \
->     --words 2400 --length "100 万字以上"
-> ```
+> （该文档所述一键脚本 `scripts/init_book.py` 未随资产迁入本仓库，当前以文档记述的标准结构为准。）
 >
-> 它生成的是**本项目标准结构**：`chapters/ characters/ world/ outline/ notes/ review/ 1-边界/`
+> 目标标准结构：`chapters/ characters/ world/ outline/ notes/ review/ 1-边界/`
 > ＋ `.soloent/{memory,constitution,rules}`，以及 `book.json`、`SOLOENT.md`、`AGENTS.md`、`tools/` 薄壳。
 > 详见 `docs/01-初始化.md`。
 
