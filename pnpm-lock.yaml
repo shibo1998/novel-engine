@@ -27,7 +27,14 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
-  packages/core: {}
+  packages/core:
+    devDependencies:
+      '@types/node':
+        specifier: '20'
+        version: 20.19.43
+      typescript:
+        specifier: '5'
+        version: 5.9.3
 
 packages:
 
