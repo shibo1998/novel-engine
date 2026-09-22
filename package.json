@@ -1,0 +1,19 @@
+{
+  "name": "novel-engine",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.base.json --noEmit",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "tsx": "^4.16.0",
+    "zod": "^3.23.0",
+    "@types/node": "^20.14.0"
+  }
+}
