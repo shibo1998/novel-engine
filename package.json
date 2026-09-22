@@ -6,7 +6,7 @@
   "packageManager": "pnpm@9.15.9",
   "engines": { "node": ">=20" },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.base.json --noEmit",
+    "typecheck": "pnpm -r build && pnpm -r run typecheck",
     "build": "pnpm -r build",
     "test": "pnpm -r test"
   },
