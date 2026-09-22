@@ -1,16 +1,36 @@
 export interface StoryState {
-  bookId: string;
-  updatedAt: string;
-  cursor: { volume: number; chapter: number };
+  /** 落盘格式版本；读取时不符即视为过期，丢弃并重建 */
+  schemaVersion: 1;
+  /** 索引生成时刻，ISO 8601 */
+  generatedAt: string;
+  /** 书根绝对路径，用于校验 state 与书是否配对 */
+  bookRoot: string;
+  /** 按 chapterNo 升序 */
   chapters: ChapterIndexEntry[];
 }
 
+/** 章节目录下的单章索引项。可从 md 重建，非真相源。 */
 export interface ChapterIndexEntry {
-  chapter: number;
+  /** 章号，取自 fileRegex 的捕获组 1，索引按此数值升序 */
+  chapterNo: number;
+  /** 章节文件名，如 "ch-05.md"。注意：与 GateFinding.chapter 是同一个值，直接对齐，无需转换 */
+  file: string;
+  /** 首行 H1 剥去章号前缀后的标题；无 H1 时为空串 */
   title: string;
-  path: string;
+  /** 正文字符数，口径：整个文件去掉全部空白字符后的码点数 */
   wordCount: number;
-  gateStatus: 'unknown' | 'passed' | 'failed';
+  /** 最近一次门禁摘要；文件从未被检查过为 null */
+  gateStatus: GateStatus | null;
+}
+
+/** 单章门禁摘要：由 runGates 结果聚合，不由 core 自动回填 */
+export interface GateStatus {
+  /** 该章命中的最高严重度；一条都没有为 "clean" */
+  worst: GateSeverity | "clean";
+  /** 该章命中的 finding 条数 */
+  count: number;
+  /** 聚合时刻，ISO 8601；供上层判断摘要是否过期 */
+  checkedAt: string;
 }
 
 export interface BuildPromptInput {

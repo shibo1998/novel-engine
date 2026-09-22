@@ -2,5 +2,7 @@ export * from './types.js';
 export { buildPrompt } from './prompt.js';
 export { callLLM } from './llm.js';
 export { runGates } from './gates.js';
-export { readState, writeState } from './state.js';
+export type { RunGatesOptions } from './gates.js';
+export { readState, writeState, summarizeGateResult } from './state.js';
+export type { ReadStateOptions } from './state.js';
 export { recordFeedback } from './feedback.js';

@@ -5,16 +5,24 @@ import type { StoryState } from '@novel/core';
 export function registerState(program: Command): void {
   program
     .command('state')
-    .description('读取或写入状态（对接 readState / writeState）')
-    .option('--set <json>', '写入状态的 JSON 字符串；不传则读取')
-    .action(async (opts: { set?: string }) => {
+    .description('读取或重建章节索引（对接 readState / writeState）')
+    .requiredOption('--book <dir>', '书根目录绝对路径')
+    .option('--rebuild', '强制重建索引并落盘')
+    .option('--set <json>', '（保留）直接写入给定状态 JSON')
+    .action(async (opts: { book: string; rebuild?: boolean; set?: string }) => {
       if (opts.set !== undefined) {
         const parsed = JSON.parse(opts.set) as StoryState;
         const ret = await writeState(parsed);
         process.stdout.write(JSON.stringify(ret ?? null) + '\n');
-      } else {
-        const state = await readState();
-        process.stdout.write(JSON.stringify(state) + '\n');
+        return;
       }
+      if (opts.rebuild === true) {
+        const rebuilt = await readState({ bookRoot: opts.book, force: true });
+        await writeState(rebuilt);
+        process.stdout.write(JSON.stringify(rebuilt) + '\n');
+        return;
+      }
+      const state = await readState({ bookRoot: opts.book });
+      process.stdout.write(JSON.stringify(state) + '\n');
     });
 }
