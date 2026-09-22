@@ -1,3 +1,5 @@
 node_modules/
 dist/
 __pycache__/
+state/story.json
+state/story.json.tmp

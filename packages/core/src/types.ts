@@ -29,8 +29,10 @@ export interface GateStatus {
   worst: GateSeverity | "clean";
   /** 该章命中的 finding 条数 */
   count: number;
-  /** 聚合时刻，ISO 8601；供上层判断摘要是否过期 */
+  /** 审计用时间戳：这次聚合发生在何时 */
   checkedAt: string;
+  /** 检查时刻该章节文件的 mtime（ms）。readState 读时与当前 mtime 比对，不等即视为过期并置 null */
+  checkedMtimeMs: number;
 }
 
 export interface BuildPromptInput {
