@@ -35,16 +35,17 @@ export interface GateStatus {
   checkedMtimeMs: number;
 }
 
-export interface BuildPromptInput {
-  stage: string;
-  context: Record<string, unknown>;
-  target?: string;
+export interface BuildPromptOptions {
+  bookRoot: string;
+  chapterNo: number;
+  mode: 'draft' | 'revise';
+  findings?: GateFinding[];        // revise 必带
 }
 
 export interface PromptBundle {
-  system: string;
-  user: string;
-  meta: { stage: string; target?: string };
+  system: string;      // 身份 + canon + rules
+  user: string;        // 本章任务 + 上下文 + 待修问题
+  ruleRefs: string[];  // 本次用到的规则文件快照（.soloent/rules 下的文件名列表）
 }
 
 export interface LLMOptions {
