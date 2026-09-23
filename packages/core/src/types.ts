@@ -80,10 +80,3 @@ export interface GateResult {
   findings: GateFinding[];
 }
 
-export interface FeedbackEntry {
-  chapter: number;
-  category: string;
-  original: string;
-  revised: string;
-  note?: string;
-}

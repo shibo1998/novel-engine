@@ -9,3 +9,4 @@ export type { ReadStateOptions } from './state.js';
 export { writeChapter, convergeChapter } from './generate.js';
 export type { WriteChapterOptions, WriteChapterResult, ConvergeOptions, ConvergeResult, ConvergeRound } from './generate.js';
 export { recordFeedback } from './feedback.js';
+export type { FeedbackInput } from './feedback.js';
