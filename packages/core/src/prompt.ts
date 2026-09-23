@@ -48,10 +48,12 @@ export interface RuleAudit {
   declared: string[];
   /** .soloent/rules/ 下实际存在的 .md（相对 .soloent/rules/，已按目录排序） */
   onDisk: string[];
-  /** 文件在磁盘上、但没被任何声明覆盖 —— 等于没加载 */
+  /** 文件在磁盘上、但没被任何声明覆盖 —— 等于没加载。**已排除 forbid（有意不启用）** */
   undeclared: string[];
   /** 声明了但磁盘上不存在 —— 会在 loadRules 抛 RuleFileMissing */
   missing: string[];
+  /** 在 forbid 清单里 —— **有意不启用**，不是漏声明 */
+  forbidden: string[];
 }
 
 /**
@@ -62,6 +64,11 @@ export interface RuleAudit {
  * loadRules 不扫目录也不递归 → 这些文件**一个都不生效**，
  * 而 buildPrompt 照常成功、闸门照常全绿，你只会觉得「改了 prompt 怎么没效果」。
  *
+ * **必须认识 `rules.forbid`**：那是作者显式表达「这文件我看过、判定不适用本书」的地方
+ * （如 rhythm-paragraph-length.md 被判为与 story-style.md 的段落观冲突）。
+ * 不认 forbid 会把它一路报成「漏声明」——4 条永久噪音，真问题就被淹没了。
+ * 信噪比比覆盖率重要：宁可少报，不可常报。
+ *
  * 只读不写，不抛错：此函数的存在意义就是把「静默」变成「可见」，
  * 它自己不许再成为新的静默点。
  */
@@ -69,7 +76,7 @@ export async function auditRules(bookRoot: string): Promise<RuleAudit> {
   const base = path.join(path.resolve(bookRoot), '.soloent');
   const rulesDir = path.join(base, 'rules');
 
-  const readDecl = async (key: 'author' | 'plugin'): Promise<string[]> => {
+  const readList = async (key: string): Promise<string[]> => {
     const raw = await readFile(path.join(base, 'book.json'), 'utf-8').catch(() => null);
     if (raw === null) return [];
     try {
@@ -80,7 +87,8 @@ export async function auditRules(bookRoot: string): Promise<RuleAudit> {
       return [];
     }
   };
-  const declared = [...(await readDecl('author')), ...(await readDecl('plugin'))];
+  const declared = [...(await readList('author')), ...(await readList('plugin'))];
+  const forbidden = await readList('forbid');
 
   // 递归扫 rules/ 全层（含子目录）——子目录正是最容易被漏声明的地方
   const walk = async (dir: string): Promise<string[]> => {
@@ -105,13 +113,16 @@ export async function auditRules(bookRoot: string): Promise<RuleAudit> {
   // 声明路径归一：分隔符统一 + 去 ./ 前缀，两端才可比
   const norm = (p: string): string => p.split('\\').join('/').replace(/^\.\//, '');
   const declaredSet = new Set(declared.map(norm));
+  const forbiddenSet = new Set(forbidden.map(norm));
   const onDiskSet = new Set(onDisk);
 
   return {
     declared,
     onDisk,
-    undeclared: onDisk.filter((f) => !declaredSet.has(f)),
+    // forbid 里的排除在外：那是有意不启用，不是漏声明
+    undeclared: onDisk.filter((f) => !declaredSet.has(f) && !forbiddenSet.has(f)),
     missing: declared.map(norm).filter((f) => !onDiskSet.has(f)),
+    forbidden: onDisk.filter((f) => forbiddenSet.has(f)),
   };
 }
 

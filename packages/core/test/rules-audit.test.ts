@@ -82,6 +82,42 @@ test('auditRules：声明用反斜杠或 ./ 前缀也能对上盘上文件（路
   }
 });
 
+test('auditRules：forbid 里的文件不算漏声明（那是「有意不启用」）', async () => {
+  // 真实场景：rhythm-paragraph-length.md 被作者判为与本书 story-style 段落观冲突，
+  // 放进 forbid 表达「看过、决定不用」。不认 forbid 会变成 4 条永久噪音，
+  // 真问题（真·漏声明）就被淹没了。
+  const root = await makeBook(
+    {
+      author: ['rules/a.md'],
+      plugin: [],
+      forbid: ['rules/active-plugin-rules/some.md'],
+    },
+    ['rules/a.md', 'rules/active-plugin-rules/some.md'],
+  );
+  try {
+    const r = await auditRules(root);
+    assert.deepEqual(r.undeclared, [], 'forbid 里的不算漏声明');
+    assert.deepEqual(r.forbidden, ['rules/active-plugin-rules/some.md'], '单独归入 forbidden');
+    assert.ok(!r.onDisk.includes('rules/_candidates'), 'onDisk 里也不该有 _candidates');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('auditRules：真·漏声明（既不在 author/plugin 也不在 forbid）仍要报出来', async () => {
+  const root = await makeBook(
+    { author: ['rules/a.md'], plugin: [], forbid: ['rules/b.md'] },
+    ['rules/a.md', 'rules/b.md', 'rules/c.md'],
+  );
+  try {
+    const r = await auditRules(root);
+    assert.deepEqual(r.undeclared, ['rules/c.md'], 'c 谁都没提，必须报');
+    assert.deepEqual(r.forbidden, ['rules/b.md']);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('auditRules：book.json 缺失/无 rules 段/JSON 坏 → 全部盘上文件算未声明，且不抛错', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'novel-rules-'));
   try {
