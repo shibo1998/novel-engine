@@ -62,6 +62,29 @@ export type LLMError =
 
 export type LLMResult = { ok: true; text: string } | LLMError;
 
+/**
+ * 改稿反馈条目——落 .soloent/feedback.jsonl，一条一行。
+ * 这是全项目**唯一不可重建**的人工数据：state/story.json 能从 chapters/ 重建，它不能。
+ * 所以落 .soloent/（与 book.json、canon.md 同级，同属「作者给这本书的输入」），
+ * 绝不放 state/（那目录的语义就是「随时可清空重来」）。
+ */
+export interface FeedbackEntry {
+  /** 记录时刻，ISO 8601 */
+  at: string;
+  /** 章号 */
+  chapterNo: number;
+  /** 章节文件名，与 ChapterIndexEntry.file 同口径 */
+  file: string;
+  /** 聚合类别：由各条 finding 的 check 前缀归并而来（如「裁判腔」）；无 finding 时为「(无)」 */
+  category: string;
+  /** 本次门禁在该章命中的 finding 条数 */
+  findingCount: number;
+  /** 人工改前的正文（原章原文，整段，不截断） */
+  original: string;
+  /** 人工改后的正文（整段，不截断） */
+  revised: string;
+}
+
 export type GateSeverity = "严重" | "中等" | "轻微" | "提示";
 
 export interface GateFinding {

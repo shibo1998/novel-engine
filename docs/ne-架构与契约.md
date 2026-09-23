@@ -12,10 +12,26 @@
 | `runGates` | `(o: RunGatesOptions) => Promise<GateResult>` | 子进程 |
 | `readState` | `(o: ReadStateOptions) => Promise<StoryState>` | 只读（不写盘） |
 | `writeState` | `(state: StoryState) => Promise<void>` | 原子写 |
-| `recordFeedback` | `(i: FeedbackInput) => Promise<{candidates: string[]}>` | 写 `_candidates/` |
+| `recordFeedback` | `(i: FeedbackInput) => Promise<{candidates: string[]}>` | 追加 `.soloent/feedback.jsonl` + 写 `_candidates/` |
 
 编排层扩展：`writeChapter` / `convergeChapter` / `applyGateResult` / `loadRules` /
-`readSummaries` / `assembleLongContext` / `updateChapterSummary` / `isRetryable`。
+`readSummaries` / `assembleLongContext` / `updateChapterSummary` / `isRetryable` /
+`loadFeedback` / `auditRules` / `checkHookAnchor` / `parseHookSpecs` / `auditHooks`。
+
+### 反馈落点（2026-09-23 裁定）
+
+`recordFeedback` 同时写两处，**不可合并**：
+
+| 落点 | 性质 | 写法 |
+|---|---|---|
+| `.soloent/feedback.jsonl` | **唯一不可重建的人工数据** —— 丢了就永远没有 | 追加式，旧行永不改写；残行只可能是最后一行，读取时丢弃 |
+| `.soloent/rules/_candidates/<date>-ch-NN.md` | 派生自 diff，可重生成 | 整份覆盖 |
+
+**为什么不放 `state/`**：`state/story.json` 是可丢弃的派生缓存（从 `chapters/` 重建），
+把唯一不可重建的数据放进「随时可以清空重来」的目录，是迟早会丢的。
+放 `.soloent/` 与 `book.json`、`canon.md` 同级——那里是「作者给这本书的输入」。
+
+反查用 `loadFeedback(bookRoot, {category, limit})`；`limit` 取**最近** N 条（尾部）。
 
 ## 2. 门禁契约（gates/ ↔ runGates）
 
@@ -86,9 +102,40 @@ CLI `generate` 的退出码：`clean/no-findings/max-rounds` → 0；`llm-error/
 
 ## 7. recordFeedback 安全边界
 
-行级 LCS diff（机械聚合，不走 LLM）→ 候选写入 `.soloent/rules/_candidates/<date>-ch-NN.md`。
+行级 LCS diff（机械聚合，不走 LLM）→ 候选写入 `.soloent/rules/_candidates/<date>-ch-NN.md`；
+同一批改稿原文与改后稿追加写 `.soloent/feedback.jsonl`（落点理由见 §1）。
 **不直接写生效规则、不动 book.json**；人工审阅后手动提升到 `author` 清单才生效——
 防自我强化错误，且可复盘「哪条规则从哪来」。
+
+## 7.1 规则「文件在但没声明」审计（`auditRules`）
+
+`loadRules` 显式声明、**不扫目录、不递归**。子目录（如 `rules/active-plugin-rules/`）
+里的文件必须在 `rules.author` / `rules.plugin` 里写全路径才会加载。
+
+隐性故障：文件躺在盘上、声明里没有 → 一个都不生效，而 `buildPrompt` 照常成功、闸门照常全绿，
+人只会觉得「改了 prompt 怎么没效果」。`auditRules` 把这个静默点变成可见：
+
+- `undeclared`：文件在但没声明 = 等于没加载（`_candidates/` 按设计排除，那是待审候选）
+- `missing`：声明了但盘上没有 = `loadRules` 会抛 `RuleFileMissing` 的那些
+
+只读不抛错 —— 它的存在意义就是把静默变可见，自己不许成为新的静默点。
+
+## 7.2 章末钩子锚词校验（`hooks.ts`）—— 边界比功能重要
+
+**它只报线索，不当结论。** 实测对真书 34 章人工对账后确认：**细纲标的是「意图」，正文写的是「变体」**。
+
+- 细纲 ch11「这台仪器前天刚校准」→ 正文「前天刚由省局技术处做过深度校准」：钩子留得更好，词面却对不上
+- 细纲 ch17 对白是原话 → 正文把后半段整段重写
+
+所以在「对白有没有被改写」这个粒度上，**词面匹配本质上不可靠**，调参无法收敛。据此定的纪律：
+
+| 纪律 | 理由 |
+|---|---|
+| 红灯只当**人工复核入口**，不当结论 | 看到红灯先自己读末段 |
+| **不接进 CI 硬失败** | 会把「作者有意改写」误杀成「质量缺陷」 |
+| 锚词提炼只取引号内内容，剔除人名/叙述性文字 | 实测踩过：把人名当锚词 → 必然误报，红灯沦为噪音 |
+| 匹配用**片段**而非整串全等 | 全等会因「都/都得」一字之差误报（实测 ch15） |
+| 明确的语义判定只能靠人工读或 LLM | 那是另一个模块，不要伪装成词面校验 |
 
 ## 8. 决策记录（不可改）
 
@@ -96,11 +143,14 @@ CLI `generate` 的退出码：`clean/no-findings/max-rounds` → 0；`llm-error/
 |---|---|
 | Python 检查器不重写，子进程调用 | 已投入，重写无收益 |
 | state 是派生缓存，正文不入 JSON | 索引与内容分离；丢了能重建 |
+| feedback 落 `.soloent/` 而非 `state/` | state 是「可清空重建」目录，feedback 是唯一不可重建的人工数据 |
 | LLM 手写薄 HTTP，不用官方 SDK | 换厂商只改 env |
 | rules 显式声明，不扫目录 | 可复盘「第 N 章用了哪版规则」 |
 | 契约适配在 Python 侧 | 契约单点，加检查器不改核心 |
 | recordFeedback 写候选不写生效规则 | 防自我强化错误 |
 | web 只调 server，不 import core | 防 CLI/Web 双轨漂移 |
+| `moduleResolution: NodeNext`（原 Bundler） | Bundler 不强制 `.js` 后缀，漏写靠人工 grep；NodeNext 由编译器强制，防双轨 |
+| `summarizeGateResult` 同章多条 finding 取**最大**严重度并累加 count | 原实现是 `Map.set` 覆盖，`worst` 会退化成最后一条 |
 
 ## 9. 雷区（都真踩过）
 
@@ -109,6 +159,8 @@ CLI `generate` 的退出码：`clean/no-findings/max-rounds` → 0；`llm-error/
 | 火绒等外部进程批量删文件 | 信任区；`git restore` 恢复前**先确认无未提交修改** |
 | tsc 报错仍 emit 污染 src/ | `noEmitOnError: true`；git add 前看 status |
 | paths→包外源码与 rootDir 冲突（TS6059） | cli 不走 paths；dist 单轨 + 根 typecheck 先 build |
+| **改 core 源码不 rebuild，CLI 跑的是旧 dist**（双轨） | 实测确认存在：`console.log` 探针不出现。挡法：NodeNext 强制后缀 + 改 core 后必 `build`（或开 `tsc -b --watch`） |
+| gate 脚本相对深度失配 → 只报「子进程启动失败」 | `gates.ts` spawn 前 `existsSync` 前置校验，报错带绝对路径 + 解析基准 |
 | Windows vite 只绑 IPv6 ::1 | `server.host = '127.0.0.1'` |
 | 换行符口径（Py 统一翻译 vs Node 原样） | 比对前归一 `\r\n`→`\n` |
 | 字数口径 | JS/Python 都吃 `\u3000`、都按码点，写死一处 |

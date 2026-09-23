@@ -176,17 +176,18 @@ export function summarizeGateResult(result: GateResult): Map<string, GateStatus>
   const map = new Map<string, GateStatus>();
   const checkedAt = new Date().toISOString();
   for (const f of result.findings) {
-    const weight = SEVERITY_WEIGHT[f.severity];
     const prev = map.get(f.chapter);
     if (prev === undefined) {
-      // checkedMtimeMs: 0 是占位——聚合层拿不到文件 mtime，由编排层（CLI --write）回填真实值；
+      // checkedMtimeMs: 0 是占位——聚合层拿不到文件 mtime，由编排层（applyGateResult / CLI --write）回填真实值；
       // 若有人跳过回填直接落盘，readState 清扫遇 0 必判过期置 null，方向保守、安全。
       map.set(f.chapter, { worst: f.severity, count: 1, checkedAt, checkedMtimeMs: 0 });
       continue;
     }
+    // 累加条数 + 取最大严重度。两处都不能省：
+    // count 不累加则恒为 1；worst 不比较则退化成「最后一条 finding 的 severity」。
     prev.count += 1;
     const prevWeight = prev.worst === 'clean' ? 0 : SEVERITY_WEIGHT[prev.worst];
-    if (weight > prevWeight) prev.worst = f.severity;
+    if (SEVERITY_WEIGHT[f.severity] > prevWeight) prev.worst = f.severity;
   }
   return map;
 }

@@ -3,3 +3,4 @@ dist/
 __pycache__/
 state/story.json
 state/story.json.tmp
+vite.config.ts.timestamp-*.mjs

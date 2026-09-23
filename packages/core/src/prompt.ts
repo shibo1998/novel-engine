@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { readState } from './state.js';
 import { assembleLongContext, CONTEXT_CHAR_CAP } from './summaries.js';
@@ -43,12 +43,83 @@ export async function loadRules(
   };
 }
 
+export interface RuleAudit {
+  /** book.json 里声明的路径（原样，相对 .soloent/） */
+  declared: string[];
+  /** .soloent/rules/ 下实际存在的 .md（相对 .soloent/rules/，已按目录排序） */
+  onDisk: string[];
+  /** 文件在磁盘上、但没被任何声明覆盖 —— 等于没加载 */
+  undeclared: string[];
+  /** 声明了但磁盘上不存在 —— 会在 loadRules 抛 RuleFileMissing */
+  missing: string[];
+}
+
+/**
+ * 规则「文件在但没声明」审计。
+ *
+ * 治的是这类隐性故障：rules/active-plugin-rules/ 下躺着一批 .md，
+ * 但 book.json 的 rules.author / rules.plugin 里没列它们，
+ * loadRules 不扫目录也不递归 → 这些文件**一个都不生效**，
+ * 而 buildPrompt 照常成功、闸门照常全绿，你只会觉得「改了 prompt 怎么没效果」。
+ *
+ * 只读不写，不抛错：此函数的存在意义就是把「静默」变成「可见」，
+ * 它自己不许再成为新的静默点。
+ */
+export async function auditRules(bookRoot: string): Promise<RuleAudit> {
+  const base = path.join(path.resolve(bookRoot), '.soloent');
+  const rulesDir = path.join(base, 'rules');
+
+  const readDecl = async (key: 'author' | 'plugin'): Promise<string[]> => {
+    const raw = await readFile(path.join(base, 'book.json'), 'utf-8').catch(() => null);
+    if (raw === null) return [];
+    try {
+      const cfg = JSON.parse(stripBom(raw)) as { rules?: Record<string, unknown> };
+      const list = cfg.rules?.[key];
+      return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  };
+  const declared = [...(await readDecl('author')), ...(await readDecl('plugin'))];
+
+  // 递归扫 rules/ 全层（含子目录）——子目录正是最容易被漏声明的地方
+  const walk = async (dir: string): Promise<string[]> => {
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    const out: string[] = [];
+    for (const e of entries) {
+      const abs = path.join(dir, e.name);
+      // _candidates/ 是 recordFeedback 产出的**待审候选**，按设计就不生效（人工提炼后才提升）。
+      // 把它算进「漏声明」会把真问题淹掉，这里整目录排除。
+      if (e.isDirectory()) {
+        if (e.name === '_candidates') continue;
+        out.push(...(await walk(abs)));
+      } else if (e.name.toLowerCase().endsWith('.md')) {
+        // 相对 .soloent/ 的路径，分隔符统一为 /，与 book.json 里的写法同形
+        out.push(path.relative(base, abs).split(path.sep).join('/'));
+      }
+    }
+    return out;
+  };
+  const onDisk = (await walk(rulesDir)).sort();
+
+  // 声明路径归一：分隔符统一 + 去 ./ 前缀，两端才可比
+  const norm = (p: string): string => p.split('\\').join('/').replace(/^\.\//, '');
+  const declaredSet = new Set(declared.map(norm));
+  const onDiskSet = new Set(onDisk);
+
+  return {
+    declared,
+    onDisk,
+    undeclared: onDisk.filter((f) => !declaredSet.has(f)),
+    missing: declared.map(norm).filter((f) => !onDiskSet.has(f)),
+  };
+}
+
 /**
  * 上一章结尾衔接段长度（码点）。
  * 注意：prevTail 只能读上一章文件——state 只存索引，正文永不入 JSON。
  */
 const PREV_TAIL_CHARS = 800;
-
 const IDENTITY = [
   '你是中文网络小说的执笔助手，为当前书籍项目撰写或修订正文章节。',
   '必须遵守 canon 与 rules 中的全部设定与禁令，不得引入与 canon 冲突的新设定。',

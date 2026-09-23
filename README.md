@@ -56,7 +56,7 @@ cd apps/web && node node_modules/vite/bin/vite.js   # :5319
 | `prompt --book <书根> --chapter <n> [--mode revise] [--dump]` | 预览 PromptBundle |
 | `gates --book <书根> [--write]` | 跑检查器；默认只读预览，--write 回填 gateStatus |
 | `state --book <书根> [--rebuild] [--set <json>]` | 读/写/重建章节索引 |
-| `feedback add --book <书根> --chapter <n> --file <改后稿>` | diff 聚合规则候选到 `_candidates/` |
+| `feedback add --book <书根> --chapter <n> --file <改后稿>` | 落 `.soloent/feedback.jsonl` + diff 聚合规则候选到 `_candidates/` |
 | `novel --help` | 完整参数 |
 
 ## server 端点（:4319，可用 NOVEL_SERVER_PORT 改）
@@ -69,6 +69,10 @@ cd apps/web && node node_modules/vite/bin/vite.js   # :5319
 - **正文永不入 JSON**；JSON 只存索引与摘要
 - core 六函数**无副作用**；写盘集中在编排层（CLI / server / generate）
 - rules **显式声明**（book.json 的 `rules.author`/`plugin`），不扫目录；声明了但文件不存在 → `RuleFileMissing`
-- recordFeedback 只写 `_candidates/` 候选，**绝不自动改生效规则**
+  - 排查「改了规则没效果」用 `auditRules`：会列出 `rules/` 下（含子目录）**文件在但没声明**的项，那些等于没加载
+- recordFeedback 写两处：`.soloent/feedback.jsonl`（**唯一不可重建的人工数据**，追加式，永不整份替换）+ `_candidates/` 候选（派生，可重生成）
+- `feedback.jsonl` 不放 `state/`：那目录的语义是「随时可清空重建」，而改稿记录丢了就永远没有
+- 门禁状态带**内容指纹** `checkedMtimeMs`：检查时刻的文件 mtime。内容变了、指纹不匹配 → 该章状态自动置 null（过期好过假绿）
+- `hook.ts` 的锚词校验**只报线索不当结论**：实测证实「细纲标意图、正文写变体」，词面匹配在这个粒度不可靠，红灯 ≠ 没留钩子
 
 详见 [docs/ne-架构与契约.md](docs/ne-架构与契约.md)。

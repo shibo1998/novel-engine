@@ -20,8 +20,19 @@ export function registerGates(program: Command): void {
       }
       // --write：编排层副作用集中于此
       const state = await readState({ bookRoot: opts.book });
-      await applyGateResult(state, result);
+      // applyGateResult 内部做的正是「跑后 stat 回填 mtime」——
+      // 注意它与 runGates 之间的窗口期：若此刻有人改章文件，回填进来的已是新 mtime，
+      // 等于把「跑期间的改动」算成已检（假绿）。彻底封死需要跑前抓快照（见下方 TODO）。
+      // TODO(假绿窗口)：runGates 前 stat 一遍 chapters/ 做快照，回填时优先用快照值而非当前 mtime。
+      const checkedAt = await applyGateResult(state, result);
       await writeState(state);
-      process.stdout.write(JSON.stringify(state) + '\n');
+      process.stdout.write(
+        JSON.stringify({
+          checkedAt,
+          chapters: state.chapters.length,
+          // 回填后的状态分布：能一眼看出「有几章真的绿了」，而不是只看到一堆 null
+          written: state.chapters.filter((c) => c.gateStatus !== null).length,
+        }) + '\n',
+      );
     });
 }

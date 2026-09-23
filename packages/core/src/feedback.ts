@@ -1,12 +1,82 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { readState } from './state.js';
+import type { FeedbackEntry, GateFinding } from './types.js';
 
 export interface FeedbackInput {
   bookRoot: string;
   chapterNo: number;
   /** 人工改后的最终正文 */
   revisedText: string;
+  /** 本次门禁在该章的 findings（可选）。有则在记录里带上类别与条数，用于 revise 分支反查 */
+  findings?: GateFinding[];
+}
+
+const FEEDBACK_FILE = 'feedback.jsonl';
+
+/** BOM 剥离。与 state.ts / prompt.ts 同款，三处必须一致 */
+function stripBom(text: string): string {
+  return text.replace(/^\uFEFF/, '');
+}
+
+/**
+ * 由 finding.check 提炼聚合类别。
+ * check 形如 "[裁判腔] 「他知道」裁判腔——改为用行为暴露想法"，
+ * 取方括号内那段作类别；无反括号前缀则整段截断兜底。
+ */
+function categoryOf(findings: GateFinding[]): string {
+  if (findings.length === 0) return '(无)';
+  const first = findings[0]!;
+  const m = /^\[([^\]]+)\]/.exec(first.check);
+  if (m?.[1] !== undefined) return m[1];
+  return first.check.slice(0, 12);
+}
+
+/**
+ * 落盘：<bookRoot>/.soloent/feedback.jsonl
+ * 格式：JSON Lines，一条 FeedbackEntry 一行，末尾带换行。
+ * 追加式：旧行永不改写，读取时全量扫。
+ * 不放 state/：那是可丢弃重建的缓存目录，feedback 是唯一不可重建的人工数据。
+ */
+async function appendFeedback(root: string, entry: FeedbackEntry): Promise<void> {
+  const dir = path.join(root, '.soloent');
+  await mkdir(dir, { recursive: true });
+  // JSON.stringify 把 entry 内部换行转义成 \n，保证「一条记录 = 物理一行」——jsonl 成立的前提
+  await appendFile(path.join(dir, FEEDBACK_FILE), JSON.stringify(entry) + '\n', 'utf-8');
+}
+
+/**
+ * 反查历史改稿，喂给 buildPrompt 的 revise 分支。
+ * 这是补「改稿归零」的机制根：findings 只说这章哪里错，
+ * 历史反馈说「这类句子你以前是怎么改的」。
+ *
+ * 不用 tmp+rename 原子写是给「整体替换快照」用的；这里用它会丢历史。
+ * 追加式的最坏情况只是最后一行写残，读取时丢弃即可。
+ *
+ * @param category 只取该类历史（如只看「裁判腔」怎么改的）
+ * @param limit    只取最近 N 条（默认全部）。注意是「最近」，取尾部
+ */
+export async function loadFeedback(
+  bookRoot: string,
+  opts?: { category?: string; limit?: number },
+): Promise<FeedbackEntry[]> {
+  const root = path.resolve(bookRoot);
+  const raw = await readFile(path.join(root, '.soloent', FEEDBACK_FILE), 'utf-8').catch(() => null);
+  if (raw === null) return [];
+
+  const out: FeedbackEntry[] = [];
+  for (const rawLine of stripBom(raw).split('\n')) {
+    const line = rawLine.trim();
+    if (line === '') continue;
+    try {
+      const e = JSON.parse(line) as FeedbackEntry;
+      if (opts?.category !== undefined && e.category !== opts.category) continue;
+      out.push(e);
+    } catch {
+      // 残行（上次写到一半崩了）：丢弃。追加式的前提是残行只可能是最后一行
+    }
+  }
+  return opts?.limit !== undefined ? out.slice(-opts.limit) : out;
 }
 
 interface DiffHunk {
@@ -74,6 +144,9 @@ function diffLines(oldText: string, newText: string): DiffHunk[] {
  */
 export async function recordFeedback(i: FeedbackInput): Promise<{ candidates: string[] }> {
   const root = path.resolve(i.bookRoot);
+  if (i.revisedText === '') {
+    throw new Error('recordFeedback：revisedText 不能为空');
+  }
   const state = await readState({ bookRoot: root });
   const entry = state.chapters.find((c) => c.chapterNo === i.chapterNo);
   if (entry === undefined) {
@@ -82,6 +155,18 @@ export async function recordFeedback(i: FeedbackInput): Promise<{ candidates: st
   const original = await readFile(path.join(root, 'chapters', entry.file), 'utf-8');
   const hunks = diffLines(original, i.revisedText);
   const date = new Date().toISOString().slice(0, 10);
+
+  // 先落不可重建的 feedback.jsonl——它是删了就没有的数据，
+  // 派生出来的候选 md 哪怕写失败也不影响这次记录已经存下来了。
+  await appendFeedback(root, {
+    at: new Date().toISOString(),
+    chapterNo: i.chapterNo,
+    file: entry.file,
+    category: categoryOf(i.findings ?? []),
+    findingCount: (i.findings ?? []).length,
+    original: stripBom(original),
+    revised: stripBom(i.revisedText),
+  });
 
   const lines = [
     `# 规则候选 · ${date} · 第 ${i.chapterNo} 章（${entry.file}）`,

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { GateResult, GateSeverity } from './types.js';
 
@@ -68,6 +69,16 @@ export async function runGates(opts: RunGatesOptions): Promise<GateResult> {
   // 路径层级钉注：本文件编译产物位于 packages/core/dist/，new URL 上溯三级 = 仓库根。
   // 若修改 tsconfig 的 outDir 或包目录深度，必须同步此处，否则会静默指到错误位置。
   const gatePath = fileURLToPath(new URL(`../../../gates/${gate}.py`, import.meta.url));
+  // 上溯相对深度一旦失配，spawn 只会报「子进程启动失败」，排查时根本想不到是路径。
+  // 所以在这里就把解析结果和解析基准一起摊开——错误信息本身要能定位问题。
+  if (!existsSync(gatePath)) {
+    throw new Error(
+      `gate 脚本不存在：${gatePath}\n` +
+        `解析基准：${import.meta.url}\n` +
+        `上溯相对深度：../../../gates/${gate}.py\n` +
+        `若改过 tsconfig 的 outDir 或包目录深度，请同步校正相对深度。`,
+    );
+  }
   // 检查器书根只认 --root 开关；位置参数会被当成章节白名单（实测：exit 2）
   const child = spawn(py, [gatePath, '--root', opts.bookRoot], {
     // 不加 PYTHONIOENCODING=utf-8，findings 里的中文在 Windows 上会变 gbk 乱码
