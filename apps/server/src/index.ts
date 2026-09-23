@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import {
   applyGateResult,
   buildPrompt,
@@ -47,6 +49,15 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/state') {
       const bookRoot = requireBookRoot(url.searchParams.get('bookRoot'));
       send(res, 200, await readState({ bookRoot }));
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/chapter') {
+      const bookRoot = requireBookRoot(url.searchParams.get('bookRoot'));
+      const file = url.searchParams.get('file');
+      if (typeof file !== 'string' || !/^[\w.-]+\.md$/.test(file)) throw new Error('file 缺失或不是合法 md 文件名');
+      const text = await readFile(path.join(path.resolve(bookRoot), 'chapters', file), 'utf-8');
+      send(res, 200, { file, text });
       return;
     }
 
