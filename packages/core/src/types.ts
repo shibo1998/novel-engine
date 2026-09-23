@@ -54,18 +54,13 @@ export interface PromptBundle {
   ruleRefs: RuleRefs;  // 实际加载的规则文件（声明与实际不等即 bug）
 }
 
-export interface LLMOptions {
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
-  signal?: AbortSignal;
-}
+export type LLMError =
+  | { ok: false; kind: 'config'; detail: string }              // env 缺失（不可重试）
+  | { ok: false; kind: 'timeout'; detail: string }             // 超时 / 网络错误（可重试）
+  | { ok: false; kind: 'http'; status: number; detail: string } // 5xx 可重试，4xx 不可
+  | { ok: false; kind: 'parse'; detail: string };              // 响应解析失败（不可重试）
 
-export interface LLMResponse {
-  text: string;
-  model: string;
-  usage: { promptTokens: number; completionTokens: number };
-}
+export type LLMResult = { ok: true; text: string } | LLMError;
 
 export type GateSeverity = "严重" | "中等" | "轻微" | "提示";
 

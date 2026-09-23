@@ -9,8 +9,7 @@ export function registerGenerate(program: Command): void {
     .requiredOption('--book <dir>', '书根目录绝对路径')
     .requiredOption('--chapter <n>', '章号', (v: string) => Number.parseInt(v, 10))
     .option('--mode <mode>', 'draft | revise', 'draft')
-    .option('--model <m>', '模型名')
-    .action(async (opts: { book: string; chapter: number; mode: string; model?: string }) => {
+    .action(async (opts: { book: string; chapter: number; mode: string }) => {
       if (opts.mode !== 'draft' && opts.mode !== 'revise') {
         throw new Error(`--mode 只接受 draft | revise，收到：${opts.mode}`);
       }
@@ -30,9 +29,12 @@ export function registerGenerate(program: Command): void {
         mode: opts.mode,
         ...(findings !== undefined ? { findings } : {}),
       });
-      const result = await callLLM(bundle, {
-        ...(opts.model !== undefined ? { model: opts.model } : {}),
-      });
+      const result = await callLLM(bundle);
+      if (!result.ok) {
+        // CLI 契约：失败走 stderr + 非 0；kind 编入 message 供人判别
+        const status = 'status' in result ? `${result.status} ` : '';
+        throw new Error(`LLM 调用失败 [${result.kind}] ${status}${result.detail}`);
+      }
       process.stdout.write(JSON.stringify(result) + '\n');
     });
 }
