@@ -8,5 +8,7 @@ export { readState, writeState, summarizeGateResult, applyGateResult } from './s
 export type { ReadStateOptions } from './state.js';
 export { writeChapter, convergeChapter } from './generate.js';
 export type { WriteChapterOptions, WriteChapterResult, ConvergeOptions, ConvergeResult, ConvergeRound } from './generate.js';
+export { readSummaries, assembleLongContext, updateChapterSummary, CONTEXT_CHAR_CAP } from './summaries.js';
+export type { ChapterSummary, SummaryStore, LongContext } from './summaries.js';
 export { recordFeedback } from './feedback.js';
 export type { FeedbackInput } from './feedback.js';

@@ -1,0 +1,13 @@
+{
+  "_schema": 1,
+  "book": { "title": "测试书" },
+  "paths": {
+    "chapters": "chapters",
+    "canon": ".soloent/canon.md",
+    "ledger": ".soloent/ledger.tsv",
+    "now": ".soloent/memory/now.md"
+  },
+  "chapter": { "file_regex": "^ch-(\\d+)\\.md$" },
+  "ledger": { "columns": ["ch", "note"], "chapter_column": "ch" },
+  "rules": { "author": ["rules/r1.md"], "plugin": [] }
+}

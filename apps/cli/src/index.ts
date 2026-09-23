@@ -3,6 +3,7 @@ import { program } from 'commander';
 import { registerPrompt } from './commands/prompt.js';
 import { registerGenerate } from './commands/generate.js';
 import { registerWrite } from './commands/write.js';
+import { registerInit } from './commands/init.js';
 import { registerGates } from './commands/gates.js';
 import { registerState } from './commands/state.js';
 import { registerFeedback } from './commands/feedback.js';
@@ -12,6 +13,7 @@ program.name('novel').description('novel-engine 命令行外壳').version('0.0.0
 registerPrompt(program);
 registerGenerate(program);
 registerWrite(program);
+registerInit(program);
 registerGates(program);
 registerState(program);
 registerFeedback(program);

@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { readState } from './state.js';
+import { assembleLongContext, CONTEXT_CHAR_CAP } from './summaries.js';
 import type { BuildPromptOptions, GateFinding, PromptBundle, RuleRefs } from './types.js';
 
 /** 声明了但磁盘上不存在的规则文件——显式报错，绝不静默跳过（「没生效」和「没写」不能长得一样） */
@@ -103,6 +104,23 @@ export async function buildPrompt(o: BuildPromptOptions): Promise<PromptBundle> 
   const prev = state.chapters.find((c) => c.chapterNo === o.chapterNo - 1);
   const prevTail = prev !== undefined ? await readPrevTail(root, prev.file) : '';
 
+  // 4.9 长文上下文：最近 2 章摘要 + 关键词相关 2 章摘要（摘要缺失 = 显式标注「暂无」，非静默跳过）
+  const longCtx = await assembleLongContext(root, o.chapterNo, prevTail);
+  const summarySection = ((): string => {
+    const blocks: string[] = [];
+    if (longCtx.recentSummaries.length > 0) {
+      blocks.push('# 近期章节摘要', ...longCtx.recentSummaries.map((s) => `- 第 ${s.chapterNo} 章：${s.summary}`));
+    }
+    if (longCtx.relatedSummaries.length > 0) {
+      blocks.push('# 相关章节摘要', ...longCtx.relatedSummaries.map((s) => `- 第 ${s.chapterNo} 章：${s.summary}`));
+    }
+    if (blocks.length === 0) return '# 章节摘要\n（暂无：summaries.json 尚未生成任何摘要）';
+    const joined = blocks.join('\n');
+    return [...joined].length <= CONTEXT_CHAR_CAP
+      ? joined
+      : [...joined].slice(0, CONTEXT_CHAR_CAP).join('') + '\n（……超出上下文上限，已截断）';
+  })();
+
   const system = [IDENTITY, canon, ...rules].filter((s) => s.trim() !== '').join('\n\n');
 
   let user: string;
@@ -117,6 +135,8 @@ export async function buildPrompt(o: BuildPromptOptions): Promise<PromptBundle> 
       '',
       '# 上一章结尾（仅作衔接参考，禁止复述）',
       prevTail !== '' ? prevTail : '（无上一章：本章从全新场景开场）',
+      '',
+      summarySection,
       '',
       '# 要求',
       '- 直接续写上一章之后的情节，不回头复述已发生内容',
