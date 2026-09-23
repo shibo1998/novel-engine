@@ -42,10 +42,16 @@ export interface BuildPromptOptions {
   findings?: GateFinding[];        // revise 必带
 }
 
+/** 规则引用，按来源分组——用于生成后对账（「第 N 章当时用了哪版规则」） */
+export interface RuleRefs {
+  author: string[];   // 相对 .soloent/ 的路径；手写规则，先于 plugin 拼接
+  plugin: string[];   // 插件来源规则，默认 []，须显式写全路径才启用
+}
+
 export interface PromptBundle {
-  system: string;      // 身份 + canon + rules
+  system: string;      // 身份 + canon + author rules + plugin rules
   user: string;        // 本章任务 + 上下文 + 待修问题
-  ruleRefs: string[];  // 本次用到的规则文件快照（.soloent/rules 下的文件名列表）
+  ruleRefs: RuleRefs;  // 实际加载的规则文件（声明与实际不等即 bug）
 }
 
 export interface LLMOptions {

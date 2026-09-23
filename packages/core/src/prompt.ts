@@ -1,7 +1,46 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { readState } from './state.js';
-import type { BuildPromptOptions, GateFinding, PromptBundle } from './types.js';
+import type { BuildPromptOptions, GateFinding, PromptBundle, RuleRefs } from './types.js';
+
+/** 声明了但磁盘上不存在的规则文件——显式报错，绝不静默跳过（「没生效」和「没写」不能长得一样） */
+export class RuleFileMissing extends Error {
+  constructor(public readonly relPath: string) {
+    super(`规则文件不存在: ${relPath}`);
+    this.name = 'RuleFileMissing';
+  }
+}
+
+/**
+ * rules 分组加载：book.json 显式声明启用集，不扫目录、不递归。
+ * 路径相对 .soloent/；author 先拼、plugin 后拼（手写规则优先级高于插件规则）。
+ * 子目录文件（如 rules/active-plugin-rules/x.md）必须在清单里显式写全路径才会加载。
+ */
+export async function loadRules(
+  bookRoot: string,
+  decl: { author?: string[]; plugin?: string[] },
+): Promise<{ text: string[]; refs: RuleRefs }> {
+  const base = path.join(bookRoot, '.soloent');
+  const load = async (list: string[] | undefined): Promise<string[]> => {
+    const out: string[] = [];
+    for (const rel of list ?? []) {
+      const abs = path.join(base, rel);
+      let content: string;
+      try {
+        content = await readFile(abs, 'utf-8');
+      } catch {
+        throw new RuleFileMissing(rel);
+      }
+      out.push(content);
+    }
+    return out;
+  };
+  const [a, p] = [await load(decl.author), await load(decl.plugin)];
+  return {
+    text: [...a, ...p],
+    refs: { author: decl.author ?? [], plugin: decl.plugin ?? [] },
+  };
+}
 
 /**
  * 上一章结尾衔接段长度（码点）。
@@ -56,13 +95,9 @@ export async function buildPrompt(o: BuildPromptOptions): Promise<PromptBundle> 
   const cfg = JSON.parse(stripBom(await readFile(path.join(dir, 'book.json'), 'utf-8'))) as Record<string, unknown>;
   const meta = extractBookMeta(cfg);
   const canon = await readFile(path.join(dir, 'canon.md'), 'utf-8').catch(() => '');
-  // rules 目录可能不存在：兜空数组；只收顶层 .md（子目录如 active-plugin-rules/ 暂不展开）
-  const ruleNames = await readdir(path.join(dir, 'rules'))
-    .then((names) => names.filter((n) => n.endsWith('.md')).sort())
-    .catch(() => [] as string[]);
-  const rules = await Promise.all(
-    ruleNames.map((n) => readFile(path.join(dir, 'rules', n), 'utf-8').catch(() => '')),
-  );
+  // rules 加载：book.json 显式声明（rules.author / rules.plugin），缺键视为空声明
+  const rulesDecl = (cfg['rules'] ?? {}) as { author?: string[]; plugin?: string[] };
+  const { text: rules, refs: ruleRefs } = await loadRules(root, rulesDecl);
 
   const entry = state.chapters.find((c) => c.chapterNo === o.chapterNo);
   const prev = state.chapters.find((c) => c.chapterNo === o.chapterNo - 1);
@@ -106,5 +141,5 @@ export async function buildPrompt(o: BuildPromptOptions): Promise<PromptBundle> 
     ].join('\n');
   }
 
-  return { system, user, ruleRefs: ruleNames };
+  return { system, user, ruleRefs };
 }

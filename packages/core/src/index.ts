@@ -1,5 +1,5 @@
 export * from './types.js';
-export { buildPrompt } from './prompt.js';
+export { buildPrompt, loadRules, RuleFileMissing } from './prompt.js';
 export { callLLM } from './llm.js';
 export { runGates } from './gates.js';
 export type { RunGatesOptions } from './gates.js';
