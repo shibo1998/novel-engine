@@ -1,40 +1,27 @@
 import type { Command } from 'commander';
-import { buildPrompt, callLLM, readState, runGates } from '@novel/core';
-import type { GateFinding } from '@novel/core';
+import { convergeChapter } from '@novel/core';
 
 export function registerGenerate(program: Command): void {
   program
     .command('generate')
-    .description('组装 prompt 并调用 LLM（对接 buildPrompt + callLLM）')
+    .description('收敛循环（对接 convergeChapter：缺章先起草，gate→revise 至 clean，上限 3 轮）')
     .requiredOption('--book <dir>', '书根目录绝对路径')
     .requiredOption('--chapter <n>', '章号', (v: string) => Number.parseInt(v, 10))
-    .option('--mode <mode>', 'draft | revise', 'draft')
-    .action(async (opts: { book: string; chapter: number; mode: string }) => {
-      if (opts.mode !== 'draft' && opts.mode !== 'revise') {
-        throw new Error(`--mode 只接受 draft | revise，收到：${opts.mode}`);
-      }
-      let findings: GateFinding[] | undefined;
-      if (opts.mode === 'revise') {
-        const state = await readState({ bookRoot: opts.book });
-        const entry = state.chapters.find((c) => c.chapterNo === opts.chapter);
-        if (entry === undefined) {
-          throw new Error(`第 ${opts.chapter} 章不在索引中，无法 revise`);
-        }
-        const gateResult = await runGates({ bookRoot: opts.book });
-        findings = gateResult.findings.filter((f) => f.chapter === entry.file);
-      }
-      const bundle = await buildPrompt({
+    .option('--max-rounds <n>', '收敛上限轮次', (v: string) => Number.parseInt(v, 10))
+    .action(async (opts: { book: string; chapter: number; maxRounds?: number }) => {
+      const result = await convergeChapter({
         bookRoot: opts.book,
         chapterNo: opts.chapter,
-        mode: opts.mode,
-        ...(findings !== undefined ? { findings } : {}),
+        ...(opts.maxRounds !== undefined ? { maxRounds: opts.maxRounds } : {}),
       });
-      const result = await callLLM(bundle);
-      if (!result.ok) {
-        // CLI 契约：失败走 stderr + 非 0；kind 编入 message 供人判别
-        const status = 'status' in result ? `${result.status} ` : '';
-        throw new Error(`LLM 调用失败 [${result.kind}] ${status}${result.detail}`);
-      }
       process.stdout.write(JSON.stringify(result) + '\n');
+      // 目标未达成且因执行错误而停（LLM 失败 / 起草失败）→ 非 0；clean/no-findings/max-rounds 为合法结果 → 0
+      if (result.stopped === 'llm-error' || result.stopped === 'draft-failed') {
+        const err = result.draftError ?? result.rounds.find((r) => r.llmError !== undefined)?.llmError;
+        const kind = err !== undefined && !err.ok ? err.kind : 'unknown';
+        const detail = err !== undefined && !err.ok ? err.detail : '';
+        process.stderr.write(`收敛中断 [${kind}] ${detail}\n`);
+        process.exitCode = 1;
+      }
     });
 }

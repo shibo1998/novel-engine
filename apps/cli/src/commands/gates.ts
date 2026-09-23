@@ -1,14 +1,12 @@
-import { stat } from 'node:fs/promises';
-import path from 'node:path';
 import type { Command } from 'commander';
-import { runGates, readState, writeState, summarizeGateResult } from '@novel/core';
+import { runGates, readState, writeState, applyGateResult } from '@novel/core';
 
 export function registerGates(program: Command): void {
   program
     .command('gates')
     .description('对书项目跑检查器（默认只读预览；--write 回填 gateStatus 并落盘）')
     .requiredOption('--book <dir>', '书根目录绝对路径')
-    .option('--write', '跑检查 → summarizeGateResult → 回填 gateStatus → writeState')
+    .option('--write', '跑检查 → applyGateResult 回填 → writeState')
     .option('--file <path>', '（已废弃）检查器不支持单章级输入')
     .action(async (opts: { book: string; write?: boolean; file?: string }) => {
       if (opts.file !== undefined) {
@@ -21,21 +19,8 @@ export function registerGates(program: Command): void {
         return;
       }
       // --write：编排层副作用集中于此
-      const bookRoot = path.resolve(opts.book);
-      const state = await readState({ bookRoot });
-      const summary = summarizeGateResult(result);
-      // 同一批时间戳：命中章与 clean 章共享（summarize 内部时间戳在此统一覆盖）
-      const checkedAt = new Date().toISOString();
-      for (const ch of state.chapters) {
-        // 内容指纹：记下检查时刻的文件 mtime，readState 读时比对，不等即过期
-        const mtimeMs = (await stat(path.join(bookRoot, 'chapters', ch.file)).catch(() => null))?.mtimeMs ?? 0;
-        const hit = summary.get(ch.file);
-        // runGates 是全量扫描：未命中 findings 的章 = 本次检查通过，必须置 clean，
-        // 否则上一轮的中等/严重会永远残留在索引里。索引有但 gate 没扫到的章同理。
-        ch.gateStatus = hit !== undefined
-          ? { ...hit, checkedAt, checkedMtimeMs: mtimeMs }
-          : { worst: 'clean', count: 0, checkedAt, checkedMtimeMs: mtimeMs };
-      }
+      const state = await readState({ bookRoot: opts.book });
+      await applyGateResult(state, result);
       await writeState(state);
       process.stdout.write(JSON.stringify(state) + '\n');
     });

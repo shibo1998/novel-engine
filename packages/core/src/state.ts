@@ -149,6 +149,26 @@ export async function writeState(state: StoryState): Promise<void> {
 }
 
 /**
+ * 把 runGates 结果回填进 state（编排层专用；core 六函数不回写状态）。
+ * runGates 是全量扫描：未命中 findings 的章 = 本次检查通过，必须置 clean（防上一轮严重度残留）。
+ * 命中章与 clean 章共享同一批 checkedAt；checkedMtimeMs 取当前文件 mtime（内容指纹）。
+ * 返回本批 checkedAt。
+ */
+export async function applyGateResult(state: StoryState, result: GateResult): Promise<string> {
+  const root = path.resolve(state.bookRoot);
+  const summary = summarizeGateResult(result);
+  const checkedAt = new Date().toISOString();
+  for (const ch of state.chapters) {
+    const mtimeMs = (await stat(path.join(root, 'chapters', ch.file)).catch(() => null))?.mtimeMs ?? 0;
+    const hit = summary.get(ch.file);
+    ch.gateStatus = hit !== undefined
+      ? { ...hit, checkedAt, checkedMtimeMs: mtimeMs }
+      : { worst: 'clean', count: 0, checkedAt, checkedMtimeMs: mtimeMs };
+  }
+  return checkedAt;
+}
+
+/**
  * 把 runGates 结果按文件名聚合成每章摘要。key 即 ChapterIndexEntry.file。
  * 注意：map 只含**有 finding 的章**；无 finding 的章由编排层按需补 { worst: "clean", count: 0 }。
  */
