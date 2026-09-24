@@ -239,7 +239,7 @@ const server = createServer(async (req, res) => {
         const readiness = await checkChapterReadiness(bookRoot, chapterNo);
         const generation = await convergeChapter({ bookRoot, chapterNo });
         // ★顺序不能换（F17）：读 state → 取**跑前** mtime 快照 → 跑 gate → 回填
-        const state = await readState({ bookRoot });
+        const state = await readState({ bookRoot, skipStaleSweep: true });
         const mtimeSnapshot = await snapshotChapterMtimes(bookRoot, state.chapters);
         const result = await runGates({ bookRoot });
         await applyGateResult(state, result, { mtimeSnapshot });
@@ -251,7 +251,7 @@ const server = createServer(async (req, res) => {
       if (url.pathname === '/gates') {
         if (body['write'] === true) {
           // ★顺序不能换（F17）：读 state → 取**跑前** mtime 快照 → 跑 gate → 回填
-          const state = await readState({ bookRoot });
+          const state = await readState({ bookRoot, skipStaleSweep: true });
           const mtimeSnapshot = await snapshotChapterMtimes(bookRoot, state.chapters);
           const result = await runGates({ bookRoot });
           await applyGateResult(state, result, { mtimeSnapshot });

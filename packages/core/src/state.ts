@@ -17,6 +17,13 @@ export interface ReadStateOptions {
   bookRoot: string;
   /** 强制走重建分支（CLI --rebuild 的入口）；契约两条分支不变，此开关只是绕过缓存 */
   force?: boolean;
+  /**
+   * 跳过「过期清扫」这一步（F16）。**只给「马上要把每一章的 gateStatus 整体覆写」
+   * 的调用方用**——那种场景下清扫结果必然被丢弃，纯属白跑一轮全量 stat。
+   * 默认必须为 false：清扫是「假绿」防线的一环，
+   * 任何「只是想读一下 state」的调用方都不该关掉它。
+   */
+  skipStaleSweep?: boolean;
 }
 
 /** 读章节正文/状态文件前的统一预处理：strip 首行 BOM */
@@ -101,7 +108,8 @@ async function sweepStaleGateStatus(root: string, chapters: ChapterIndexEntry[])
  *  1. <bookRoot>/state/story.json 存在且 schemaVersion 匹配且与书配对 → 解析返回
  *  2. 不存在 / 版本不符 / 与书不配对 / JSON 损坏 → 扫 chapters/ 重建（内存返回，不写盘）
  *  3. bookRoot 不是目录 → throw
- *  返回前一律经过过期清扫（重建分支产出全 null，清扫为空操作）。
+ *  返回前一律经过过期清扫（重建分支产出全 null，清扫为空操作）；
+ *  skipStaleSweep=true 时跳过清扫，仅见 ReadStateOptions 里的使用约束。
  */
 export async function readState(opts: ReadStateOptions): Promise<StoryState> {
   // 归一：绝对化 + 分隔符统一为平台形式。所有拼 state 路径、bookRoot 比较、落盘一律用 root。
@@ -125,7 +133,7 @@ export async function readState(opts: ReadStateOptions): Promise<StoryState> {
     }
   }
   state ??= await rebuildState(root);
-  await sweepStaleGateStatus(root, state.chapters);
+  if (opts.skipStaleSweep !== true) await sweepStaleGateStatus(root, state.chapters);
   return state;
 }
 

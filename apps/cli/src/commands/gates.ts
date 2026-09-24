@@ -22,7 +22,9 @@ export function registerGates(program: Command): void {
       // 旧版是「跑完再 stat 回填」，于是跑期间有人改章文件时，回填进来的是**新** mtime，
       // 等于把「跑期间的改动」算成已检（假绿窗口）。改成只认跑前快照后，跑期间的改动
       // 会因「当前 mtime ≠ checkedMtimeMs」在下次 readState 清扫时被置 null（回到待检）。
-      const state = await readState({ bookRoot: opts.book });
+      // skipStaleSweep（F16）：本轮会把每一章的 gateStatus 整体覆写，清扫结果注定被丢弃，
+      // 关掉它省掉一整轮全量 stat——过闸链路的 IO 于是收敛为「正好一轮 stat」。
+      const state = await readState({ bookRoot: opts.book, skipStaleSweep: true });
       const mtimeSnapshot = await snapshotChapterMtimes(state.bookRoot, state.chapters);
       const result = await runGates({ bookRoot: opts.book });
       const checkedAt = await applyGateResult(state, result, { mtimeSnapshot });

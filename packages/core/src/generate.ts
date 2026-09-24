@@ -133,7 +133,7 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
     // ★三步顺序不能换（F17）：先读 state → 再取**跑前** mtime 快照 → 最后才跑 gate 并回填。
     // 旧版是「跑完再 stat 回填」：本轮（或上一轮刚改写）变更的 mtime 会被当成「已检」，
     // 形成假绿窗口。只认快照值后，跑期间被改的章会在下次 readState 清扫时回到待检。
-    state = await readState({ bookRoot: root });
+    state = await readState({ bookRoot: root, skipStaleSweep: true });
     const mtimeSnapshot = await snapshotChapterMtimes(root, state.chapters);
     const gateResult = await runGates({ bookRoot: root });
     const chapterFindings = gateResult.findings.filter((f) => f.chapter === file);
