@@ -54,11 +54,12 @@ cd apps/web && node node_modules/vite/bin/vite.js   # :5319
 | `write --book <书根> --chapter <n>` | 起草一章（draft 流水线） |
 | `generate --book <书根> --chapter <n>` | 收敛循环：缺章先起草，gate→revise 至 clean |
 | `prompt --book <书根> --chapter <n> [--mode revise] [--dump]` | 预览 PromptBundle |
-| `preflight --book <书根> --chapter <n>` | 检查正典与 `outline/ch-NN.md`；只提示，不阻断起稿 |
+| `preflight --book <书根> --chapter <n>` | 正典与 `outline/ch-NN.md` 准备情况（**只提示**）；另含风格/红线层就绪闸门——**未就绪则非 0 退出、阻断开写** |
 | `gates --book <书根> [--write]` | 跑检查器；默认只读预览，--write 回填 gateStatus |
-| `state --book <书根> [--rebuild] [--set <json>]` | 读/写/重建章节索引 |
+| `state --book <书根> [--rebuild] [--set <json>]` | 读/重建章节索引；`--set` 可写数据字段，但**门禁摘要一律被摘掉**（绿只能由 `gates` 跑出来） |
 | `summarize --book <书根> --chapter <n>` | 生成或刷新长篇上下文摘要 |
 | `rules audit --book <书根>` | 检查规则文件遗漏声明或声明路径缺失 |
+| `hooks --book <书根> [--all]` | 章末钩子锚词校验（**只读线索报告**：不计入拦截、不影响退出码，红灯须人工复核） |
 | `feedback add --book <书根> --chapter <n> --file <改后稿>` | 落 `.soloent/feedback.jsonl` + diff 聚合规则候选到 `_candidates/` |
 | `novel --help` | 完整参数 |
 
@@ -78,6 +79,7 @@ cd apps/web && node node_modules/vite/bin/vite.js   # :5319
 - recordFeedback 写两处：`.soloent/feedback.jsonl`（**唯一不可重建的人工数据**，追加式，永不整份替换）+ `_candidates/` 候选（派生，可重生成）
 - `feedback.jsonl` 不放 `state/`：那目录的语义是「随时可清空重建」，而改稿记录丢了就永远没有
 - 门禁状态带**内容指纹** `checkedMtimeMs`：检查时刻的文件 mtime。内容变了、指纹不匹配 → 该章状态自动置 null（过期好过假绿）
-- `hook.ts` 的锚词校验**只报线索不当结论**：实测证实「细纲标意图、正文写变体」，词面匹配在这个粒度不可靠，红灯 ≠ 没留钩子
+- 任何**不经检查就能写出「绿」**的路都必须堵掉：`novel state --set` 保留入口（fixture／迁移用途），但落盘前一律摘除 `gateStatus`——「绿」只能由 `gates` 跑出来
+- 章末钩子锚词校验（`packages/core/src/hooks.ts`，入口 `novel hooks`）**只报线索不当结论**：实测证实「细纲标意图、正文写变体」，词面匹配在这个粒度不可靠，红灯 ≠ 没留钩子。故它**不接 CI 硬失败**，只出只读报告
 
 详见 [docs/ne-架构与契约.md](docs/ne-架构与契约.md)。
