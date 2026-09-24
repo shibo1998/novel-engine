@@ -13,6 +13,7 @@ import {
   resetLlmBreaker,
   runGates,
   snapshotChapterMtimes,
+  stripGateStatus,
   writeState,
 } from '../src/index.js';
 
@@ -196,6 +197,77 @@ test('篇幅口径自检：测试用的造书函数确实写出了预期章数�
     assert.equal(state.chapters.length, 4);
     const s = await stat(path.join(root, 'chapters', 'ch-04.md'));
     assert.ok(s.size > 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * `novel state --set` 的净化（2026-09-24 作者裁定「保留入口、剥掉越界部分」）。
+ *
+ * 为什么值得进这张不变量网：`--set` 原先能把任意 `gateStatus` 原样写盘，
+ * 是本仓**唯一**一条不经任何检查就能写出绿的路。裁定之后它仍然存在（fixture／迁移
+ * 用途），所以「它确实剥掉了摘要」这件事必须由测试守着——否则某次重构顺手删掉
+ * `stripGateStatus`，那条路会**静默**回来，且不会有任何红灯。
+ */
+test('state --set 净化：stripGateStatus 摘掉全部门禁摘要，数据字段不连坐', async () => {
+  const root = await makeBook(3);
+  try {
+    const state = await readState({ bookRoot: root });
+    const forged = {
+      ...state,
+      chapters: state.chapters.map((ch, i) => ({
+        ...ch,
+        gateStatus: i === 0
+          ? { worst: 'clean' as const, count: 0, checkedAt: new Date().toISOString(), checkedMtimeMs: 1 }
+          : null,
+      })),
+    };
+
+    const { state: sanitized, removed } = stripGateStatus(forged);
+
+    assert.equal(removed, 1, '应如实报告摘掉了 1 章的摘要');
+    assert.equal(sanitized.chapters.every((c) => c.gateStatus === null), true, '不得残留任何摘要');
+    // 数据字段必须原样：净化只砍「结论」，不砍「输入」，否则迁移/fixture 用途就没了
+    assert.deepEqual(
+      sanitized.chapters.map((c) => [c.chapterNo, c.file, c.title, c.wordCount]),
+      forged.chapters.map((c) => [c.chapterNo, c.file, c.title, c.wordCount]),
+    );
+    // 纯函数：不得就地改写调用方传进来的对象
+    assert.notEqual(forged.chapters[0]?.gateStatus, null, '原对象应保持不变');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('state --set 净化：伪造的绿落盘后，readState 读回来仍是「待检」', async () => {
+  const root = await makeBook(2);
+  try {
+    const state = await readState({ bookRoot: root });
+    // ★这是关键夹具：checkedMtimeMs 取**真实** mtime，所以这枚假绿能存活过期清扫。
+    // 若不走净化，它会一路显示成「已检通过」——这正是被堵掉的那条路。
+    const realMtime = (await stat(path.join(root, 'chapters', 'ch-01.md'))).mtimeMs;
+    const forged = {
+      ...state,
+      chapters: state.chapters.map((ch) => ({
+        ...ch,
+        gateStatus: {
+          worst: 'clean' as const,
+          count: 0,
+          checkedAt: new Date().toISOString(),
+          checkedMtimeMs: realMtime,
+        },
+      })),
+    };
+
+    await writeState(stripGateStatus(forged).state);
+    const back = await readState({ bookRoot: root });
+
+    assert.equal(
+      back.chapters.every((c) => c.gateStatus === null),
+      true,
+      '未经检查的「绿」不得从 state --set 这条路进来',
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

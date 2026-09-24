@@ -11,6 +11,7 @@ import { registerFeedback } from './commands/feedback.js';
 import { registerPreflight } from './commands/preflight.js';
 import { registerSummarize } from './commands/summarize.js';
 import { registerRules } from './commands/rules.js';
+import { registerHooks } from './commands/hooks.js';
 
 program.name('novel').description('novel-engine 命令行外壳').version('0.0.0');
 
@@ -25,6 +26,7 @@ registerFeedback(program);
 registerPreflight(program);
 registerSummarize(program);
 registerRules(program);
+registerHooks(program);
 
 try {
   await program.parseAsync(process.argv);

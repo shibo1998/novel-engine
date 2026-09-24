@@ -191,61 +191,90 @@ def _roster_completeness(book, C, add):
             "正典是唯一事实来源；新角色只写在正文里，几十章后就会被写成另一个人")
 
 
-def _hook_check(book, C, chno, fn, lines, add):
-    """细纲「章末钩子」与正文结尾是否对得上（承诺 vs 交付）。
+# 2026-09-24 删除 `_hook_check`（原 194-223 行）。删因：
+#   ① 它靠 `import brief` 取细纲钩子，而 `brief.py` 未随迁、全仓不存在；
+#      外层 `except Exception: return` 把 ImportError 一并吞掉 → **恒不生效且毫无提示**。
+#   ② 同一判据已在 TS 侧重新实现：`packages/core/src/hooks.ts`（213 行 + 10 项测试），
+#      且成熟度更高——它带了实测 34 章人工对账后定的纪律（只报线索不当结论、
+#      不接 CI 硬失败、锚词剔除人名、片段匹配而非整串全等），见
+#      `docs/ne-架构与契约.md §7.2`「边界比功能重要」。
+#   ③ 留两份实现正是本仓禁止的「同一判据两份副本」；且两份都不生效。
+# 处置：删 Python 这份，改由 `novel hooks` 出**只读报告**（不计入拦截、不影响退出码，
+# 守住 §7.2 的纪律）。本检查器从此不再产出 hook 类 finding。
 
-    只做词面交集，判「有没有」不判「好不好」；零交集才报，属提示级。
-    窗口按**非空行**取（默认 5 行）：钩子句常常落在最后一段里而不是最后一行，
-    按行号切会把「已经落地了」误判成「没落地」。
+
+# 伏笔回收总表**没有规范 schema**——两本真书的列名与列序都不一样：
+#   高武 | 伏笔 | 埋设 | 半引爆 | 状态 |            埋设值形如 "6（首金）/ 23（闪回）"
+#   仙侠 | 伏笔内容 | 埋设位置 | 预期收回 | 状态 | 备注 |  埋设值形如 "第 1 / 16 / 38 章"
+# 旧实现写死「第 3 列、且必须是裸整数」，于是**两本书一行都解析不出来**，
+# 还静默返回 0 条——2026-09-25 实测：真书打开开关后 0 findings，看着像「查了没问题」。
+# 这与本仓反复在治的「查不到 = 没问题」是同一个病，只是这次发生在解析层。
+# 改为：① 按表头里含「埋设」的那一列定位（不写死列号，两本书都能对上）；
+#       ② 从该列**宽松抽取**所有数字（兼容 第80章／6（首金）／33–34／1 / 16 / 38）。
+# 仍然只是词面口径，不判语义；判不出东西时由 note 显式说明，绝不再静默。
+
+
+def _foreshadow_rows(book):
+    """解析伏笔回收总表 → `([(伏笔名, [章号...]), ...], note)`。
+
+    note 非空 = **一条都没解析出来**，且说明卡在哪。调用方必须把它显示出来——
+    「0 条发现」与「0 条输入」形状不同，这是本项目的硬规矩。
     """
-    H = C.get("hook_check") or {}
-    if not H or not H.get("enabled", True):
-        return
-    try:
-        import brief as _brief
-        blk = _brief.outline_block(book, chno)
-    except Exception:
-        return
-    if not blk:
-        return
-    _, _, _, htext = blk
-    if not htext or len(htext) < 8:
-        return
-    tail = int(H.get("tail_lines", 5) or 5)
-    solid = [l for l in lines if l.strip()]
-    tail_text = "".join(solid[-tail:]) if solid else ""
-    if kit.hanzi_count(tail_text) < 20:
-        return
-    toks = _bigrams(htext)
-    if toks and not any(t in tail_text for t in toks):
-        add("轻微", fn, 0,
-            f"本章结尾（最后 {tail} 段）与细纲「章末钩子」没有任何词面交集"
-            "——钩子可能没落到位，也可能细纲改了没回填（承诺 vs 交付对不上）", htext[:50])
+    raw = book.read_path("foreshadow")
+    if not raw:
+        return [], "伏笔表读不到（book.json 的 paths.foreshadow 指向的文件不存在）"
+    lines = [l.strip() for l in raw.splitlines() if l.strip().startswith("|")]
+    if not lines:
+        return [], "伏笔表里没有任何表格行"
+
+    # ① 定位「埋设」列：取表头行里含「埋设」的那一格（兼容「埋设」与「埋设位置」）
+    col = None
+    for l in lines:
+        cells = [c.strip() for c in l.strip("|").split("|")]
+        idx = [i for i, c in enumerate(cells) if "埋设" in c]
+        if idx:
+            col = idx[0]
+            break
+    if col is None:
+        return [], "伏笔表里找不到含「埋设」的表头列（无从判断哪一列是埋设章号）"
+
+    rows = []
+    for l in lines:
+        if "---" in l:
+            continue
+        cells = [c.strip() for c in l.strip("|").split("|")]
+        if len(cells) <= col or "埋设" in cells[col]:
+            continue                       # 表头行 / 列数不够的行
+        name = re.sub(r"[*_`]", "", cells[0]).strip()
+        chs = [int(x) for x in re.findall(r"\d+", cells[col])]
+        if name and chs:
+            rows.append((name, chs))
+    if not rows:
+        return [], (f"表头「埋设」在第 {col + 1} 列，但没有任何一行的该列含章号"
+                    "（认「6（首金）」「第 1 / 16 / 38 章」「33–34」这几种写法）")
+    return rows, ""
 
 
 def _foreshadow_check(book, C, chno, fn, text, add):
-    """伏笔回收总表标了「埋设于第 N 章」，就该在第 N 章找到它的线索词。"""
+    """伏笔回收总表标了「埋设于第 N 章」，就该在第 N 章找到它的线索词。
+
+    只做词面交集，判「有没有」不判「好不好」；零交集才报，属提示级。
+    口径的天然局限要说清：作者可能**故意**把伏笔埋得很轻——仙侠的伏笔表就明写
+    「埋得越轻越好，不许加任何提示性描写」。那种情况下词面零交集未必是漏埋，
+    所以它只当线索，不作结论（与 `novel hooks` 同一纪律）。
+    """
     F = C.get("foreshadow_check") or {}
     if not F or not F.get("enabled", True):
         return
-    raw = book.read_path("foreshadow")
-    if not raw:
-        return
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line.startswith("|") or "---" in line:
-            continue
-        cells = [c.strip() for c in line.strip("|").split("|")]
-        if len(cells) < 3:
-            continue
-        fid, name, plant = cells[0], cells[1], cells[2]
-        if not re.match(r"^\d+$", plant) or int(plant) != chno:
+    rows, _note = _foreshadow_rows(book)
+    for name, chs in rows:
+        if chno not in chs:
             continue
         toks = _bigrams(re.sub(r"[（(].*?[)）]", "", name))
         if toks and not any(t in text for t in toks):
             add("轻微", fn, 0,
-                f"伏笔[{fid}] 标了「埋设于第 {chno} 章」，但本章找不到它的任何线索词"
-                f"——要么没埋，要么表没回填", name)
+                f"伏笔「{name}」标了埋设于第 {chno} 章，但本章找不到它的任何线索词"
+                "——要么没埋，要么表没回填", name)
 
 
 # ------------------------------------------------------------------ 检查
@@ -483,8 +512,9 @@ def check(book, chapters):
                             l[:60])
                         break
 
-        # 16d 内容层「承诺 vs 交付」（2026-09-20 新增；全都按 book.json 开关，无配置即跳过）
-        _hook_check(book, C, chno, fn, lines, add)
+        # 16d 内容层「承诺 vs 交付」（2026-09-20 新增；按 book.json 开关，无配置即跳过）
+        # 章末钩子那半已于 2026-09-24 移出本检查器（见上方 `_hook_check` 处的删除说明），
+        # 改由 `novel hooks` 出只读报告。
         _foreshadow_check(book, C, chno, fn, text, add)
 
         # 17 句长节奏（分轨：叙述与对话各算各的）
@@ -670,11 +700,19 @@ def print_checks(book):
     if NR:
         rows.append(("轻微", "登记完整性  canon.md 人物表里的角色，characters/ 下必须有对应的卡"
                              "（人名从正文抽取试过，中文无词边界会大量切碎常用词，已弃用）"))
-    if C.get("hook_check"):
-        rows.append(("轻微", f"章末钩子  与细纲「章末钩子」零词面交集即提示"
-                             f"（只看最后 {C['hook_check'].get('tail_lines', 5)} 段非空行）"))
+    # 章末钩子（hook_check）刻意不在本清单：该机检项 2026-09-24 已整项移出检查器，
+    # 改由 `novel hooks` 出只读报告（不计入拦截、不影响退出码，见 docs/ne-架构与契约.md §7.2）。
+    # 列在这里会让人以为「跑一次 gates 就核过钩子了」，而事实是不会。
     if C.get("foreshadow_check"):
-        rows.append(("轻微", "伏笔埋设  回收总表标了「埋设于第 N 章」而该章无线索词即提示"))
+        # 把「本次到底拿几条伏笔去比」写进清单：不写的话，作者看到 0 findings
+        # 无从分辨是「查过且没问题」还是「压根没解析出东西」。
+        _frows, _fnote = _foreshadow_rows(book)
+        _fdesc = "伏笔埋设  回收总表标了「埋设于第 N 章」而该章无线索词即提示"
+        if _fnote:
+            _fdesc += f"　⚠️ 当前解析不出任何伏笔：{_fnote}"
+        else:
+            _fdesc += f"（本次解析到 {len(_frows)} 条伏笔）"
+        rows.append(("轻微", _fdesc))
 
     # --- 未启用 / 不会生效的机检项（2026-09-24 新增）---
     # 为什么必须显式列出来：某项在 findings 里没出现，可能是「查了没问题」，
@@ -702,19 +740,19 @@ def print_checks(book):
     elif P.get("max_lines") is None and not P.get("forbid"):
         off.append(("面板文体", "既无 max_lines 也无 forbid——本项不会产出任何发现"))
 
-    H = C.get("hook_check") or {}
-    if not H or not H.get("enabled", True):
-        off.append(("章末钩子", "checks.hook_check 未启用"))
-    else:
-        # ★本仓特有：_hook_check 靠 `import brief` 取细纲钩子，而 brief.py 在迁仓时没跟过来。
-        # 它的 except 会把 ImportError 一起吞掉并 return —— 于是「启用了」与「生效了」不同。
-        # 这种「配置看起来对、实际恒不生效」的项，正是最该被点名的。
-        try:
-            import brief  # noqa: F401
-        except Exception:
-            off.append(("章末钩子",
-                        "已启用但**恒不生效**：检查器依赖 brief 模块（brief.py），本仓不存在，"
-                        "ImportError 被 except 吞掉后直接 return"))
+    # 章末钩子（hook_check）不在此节：它已不是本检查器的机检项，无所谓「未生效」。
+    # 判据现在在 `novel hooks` 里，那边自带「没解析到锚词」的显式提示——
+    # 也就是说，「查不到」与「查了没问题」在那边形状不同，本节的职责不再需要覆盖它。
+
+    # 已废弃的键：book.json 里若还留着 checks.hook_check，它现在**不会被任何东西读取**。
+    # 为什么必须点名而不是沉默跳过：这正是本节存在的理由——让「写了但没人读」可见。
+    # 作者留着这个键、以为章末钩子还在被检查，是比键本身更坏的事。
+    # 注意：**不能**把它做成 config_problems（那会 sys.exit(2)）——两本真书都还带着
+    # `hook_check: null`，报成结构错误会直接把书锁死。废弃 ≠ 配置非法。
+    if "hook_check" in C:
+        off.append(("章末钩子（已废弃）",
+                    "checks.hook_check 自 2026-09-24 起不再被读取——原实现依赖未随迁的 brief.py，"
+                    "恒不生效，已整项移出检查器；章末钩子改由 `novel hooks` 出只读报告，本键可删"))
 
     F = C.get("foreshadow_check") or {}
     if not F or not F.get("enabled", True):
@@ -725,6 +763,13 @@ def print_checks(book):
             off.append(("伏笔埋设", "已启用但恒不生效：book.json 的 paths.foreshadow 未声明"))
         elif not os.path.isfile(os.path.join(book.root, _fp)):
             off.append(("伏笔埋设", f"已启用但恒不生效：伏笔表文件不存在（{_fp}）"))
+        else:
+            # 文件在、开关也开，但**表解析不出东西**——这是最隐蔽的一种「不生效」：
+            # 所有前置条件都齐了，跑起来 0 findings，看着像「查过且没问题」。
+            # 2026-09-25 实测踩到：两本真书的伏笔表列序与旧实现假设不符，静默 0 输入。
+            _fr, _fnote = _foreshadow_rows(book)
+            if _fnote:
+                off.append(("伏笔埋设", f"已启用但**恒不生效**：{_fnote}"))
 
     NR = C.get("name_roster") or {}
     if not NR or not NR.get("enabled", True):

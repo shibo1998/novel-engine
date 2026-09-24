@@ -95,8 +95,13 @@ export function enclosingStageHeading(text: string, chapterNo: number): string {
   return found;
 }
 
-/** 读 book.json 的 paths.outline —— 书自己声明的「本阶段/本卷细纲」文件 */
-async function declaredOutlinePath(root: string): Promise<string> {
+/**
+ * 读 book.json 的 paths.outline —— 书自己声明的「本阶段/本卷细纲」文件。
+ *
+ * 导出给 `novel hooks` 用：钩子锚词也要从同一份细纲里解析。**不要另写一份读取器**——
+ * 「同一份配置两处读、两处解释」正是本仓反复在治的漂移源。
+ */
+export async function declaredOutlinePath(root: string): Promise<string> {
   try {
     const raw = await readFile(path.join(root, '.soloent', 'book.json'), 'utf-8');
     const cfg = JSON.parse(stripBom(raw)) as { paths?: { outline?: string } };

@@ -364,7 +364,7 @@ def config_problems(cfg):
     正文命名规则、账本列结构。正典机检项等业务数值**不在校验范围**——
     那些本来就允许为空、随写作长出（见 docs/00-总览与流程.md）。
 
-    例外：**由插件提供的可选机检项**（panel / name_roster / hook_check /
+    例外：**由插件提供的可选机检项**（panel / name_roster /
     foreshadow_check / rhythm）是固定 schema，不是「随书长出」的，所以校验类型。
     起因（2026-09-20 实测）：把 `checks.panel.max_lines` 写成字符串「十」，
     consistency_check 直接崩在 `int('十')` 上，报错是
@@ -444,14 +444,9 @@ def _optional_check_types(cfg):
             if R.get("turn_words") is not None and not isinstance(R.get("turn_words"), list):
                 out.append("checks.rhythm.turn_words 应为字符串列表")
 
-    for name, int_key in (("hook_check", "tail_lines"), ):
-        H = C.get(name)
-        if H is None:
-            continue
-        if not isinstance(H, dict):
-            out.append(f"checks.{name} 应为对象或 null")
-        else:
-            need_num(f"checks.{name}.{int_key}", H.get(int_key), 1)
+    # checks.hook_check 的类型校验 2026-09-24 已删除——该机检项整项移出检查器
+    # （Python 侧依赖未随迁的 brief.py，恒不生效），判据改由 TS 侧 `novel hooks` 承担。
+    # 保留校验只会让 book.json 里一个没人读的键看起来「合法且有效」。
 
     NR = C.get("name_roster")
     if NR is not None:

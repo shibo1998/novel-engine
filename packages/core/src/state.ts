@@ -179,6 +179,30 @@ export async function writeState(state: StoryState): Promise<void> {
 }
 
 /**
+ * 摘掉所有章节的 `gateStatus`，返回新对象与被摘掉的章数。
+ *
+ * **用途唯一**：给「不经检查就直接写状态」的入口（当前只有 `novel state --set`）
+ * 在落盘前做一次净化。为什么必须做：`gateStatus` 是**检查的结论**，不是作者输入；
+ * 任何不经过 `runGates` 就能写进它的路径，都是一条「不经检查写出绿」的路——
+ * 喂 `{worst:"clean", checkedMtimeMs:<真实 mtime>}` 就能骗过 readState 的过期清扫
+ * 并显示在面板上。这条路在 2026-09-24 被判为「保留入口、剥掉越界部分」：
+ * 数据字段（story_time / rank / 账本 …）照常可写，迁移与 fixture 用途不受影响，
+ * 但**结论字段一律不得从这条路进来**。
+ *
+ * 摘掉而不是拒绝：拒绝会让「只想改一个数据字段」的正常调用方连坐；
+ * 摘掉只损失它本就不该提供的能力，且由调用方把代价如实报给用户。
+ */
+export function stripGateStatus(state: StoryState): { state: StoryState; removed: number } {
+  let removed = 0;
+  const chapters = state.chapters.map((ch) => {
+    if (ch.gateStatus === null) return ch;
+    removed += 1;
+    return { ...ch, gateStatus: null };
+  });
+  return { state: { ...state, chapters }, removed };
+}
+
+/**
  * 跑 gate **之前**对每章取 mtime 快照，key = ChapterIndexEntry.file。
  *
  * 为什么必须在跑之前取：假绿窗口。applyGateResult 若在跑完之后才 stat 回填，
