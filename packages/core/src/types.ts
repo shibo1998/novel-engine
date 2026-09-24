@@ -58,7 +58,8 @@ export type LLMError =
   | { ok: false; kind: 'config'; detail: string }              // env 缺失（不可重试）
   | { ok: false; kind: 'timeout'; detail: string }             // 超时 / 网络错误（可重试）
   | { ok: false; kind: 'http'; status: number; detail: string } // 5xx 可重试，4xx 不可
-  | { ok: false; kind: 'parse'; detail: string };              // 响应解析失败（不可重试）
+  | { ok: false; kind: 'parse'; detail: string }               // 响应解析失败（不可重试）
+  | { ok: false; kind: 'circuit-open'; detail: string };       // 熔断中：连续失败够多，冷却期内不再发请求
 
 /**
  * gate 子进程的失败分类。刻意与 LLMError 的 kind 共用词汇（'timeout' 等）：

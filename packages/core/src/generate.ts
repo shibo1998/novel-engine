@@ -92,6 +92,14 @@ export interface ConvergeResult {
   finalWorst: string;
   stopped: 'clean' | 'no-findings' | 'max-rounds' | 'llm-error' | 'draft-failed';
   draftError?: LLMResult;
+  /**
+   * 本次实际发出的 LLM 请求次数上限（F15）。
+   * 暴露它是为了让「重试层数 × 轮数」这个乘积**可被审计**：
+   * 上界 = 轮数 × (1 + NOVEL_LLM_RETRY_ATTEMPTS)；持续失败时熔断器会提前掐断，
+   * 所以实际值只会更小，不会更大。没这个数，任何「为什么会烧这么多 token」的
+   * 追问都只能靠推演。
+   */
+  llmCalls: number;
 }
 
 /**
@@ -106,7 +114,10 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
 
   let state = await readState({ bookRoot: root });
   let drafted = false;
+  // 实际发出的 LLM 请求计数（F15）：让「轮数 × 重试层数」这个乘积可被审计
+  let llmCalls = 0;
   if (!state.chapters.some((c) => c.chapterNo === o.chapterNo)) {
+    llmCalls += 1;
     const w = await writeChapter({
       bookRoot: root,
       chapterNo: o.chapterNo,
@@ -120,6 +131,7 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
         finalWorst: 'unknown',
         stopped: 'draft-failed',
         ...(w.llm !== undefined ? { draftError: w.llm } : {}),
+        llmCalls,
       };
     }
     drafted = true;
@@ -154,6 +166,7 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
     }
 
     const bundle = await buildPrompt({ bookRoot: root, chapterNo: o.chapterNo, mode: 'revise', findings: chapterFindings });
+    llmCalls += 1;
     const r = await callLLM(bundle, o.llm);
     if (!r.ok) {
       rounds.push({ round: i, findings: chapterFindings.length, worst, action: 'stop-llm-error', llmError: r });
@@ -164,5 +177,5 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
     rounds.push({ round: i, findings: chapterFindings.length, worst, action: 'revise' });
   }
 
-  return { file, drafted, rounds, finalWorst, stopped };
+  return { file, drafted, rounds, finalWorst, stopped, llmCalls };
 }

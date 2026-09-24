@@ -1,7 +1,7 @@
 export * from './types.js';
 export { buildPrompt, loadRules, auditRules, RuleFileMissing } from './prompt.js';
 export type { RuleAudit } from './prompt.js';
-export { callLLM, isRetryable } from './llm.js';
+export { callLLM, isRetryable, llmBreakerState, resetLlmBreaker } from './llm.js';
 export type { CallLLMOptions } from './llm.js';
 export { runGates, GateFailureError } from './gates.js';
 export type { RunGatesOptions } from './gates.js';
