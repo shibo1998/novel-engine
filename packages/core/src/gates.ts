@@ -10,6 +10,12 @@ export interface RunGatesOptions {
   python?: string;     // 默认 NOVEL_PYTHON 环境变量，再回退平台默认
   /** 子进程硬超时（ms）。缺省取 NOVEL_GATE_TIMEOUT_MS，再缺省 DEFAULT_GATE_TIMEOUT_MS。 */
   timeoutMs?: number;
+  /**
+   * 外部取消（F20-2）。触发时 SIGKILL 子进程并以 kind='aborted' 失败。
+   * 存在的理由：前端断开连接**只是断开连接**——server 是无状态的、每次现读，
+   * spawn 出去的检查器会继续跑完。要真能停，只能由持有句柄的一侧显式取消。
+   */
+  signal?: AbortSignal;
 }
 
 const SEVERITIES: ReadonlySet<string> = new Set<GateSeverity>(['严重', '中等', '轻微', '提示']);
@@ -46,34 +52,62 @@ export class GateFailureError extends Error {
  */
 type Collected =
   | { ok: true; code: number | null; stdout: string; stderr: string }
-  | { ok: false; kind: 'spawn' | 'timeout'; detail: string; stdout: string; stderr: string };
+  | { ok: false; kind: 'spawn' | 'timeout' | 'aborted'; detail: string; stdout: string; stderr: string };
 
-function collect(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<Collected> {
+function collect(
+  child: ChildProcessWithoutNullStreams,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<Collected> {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
     let settled = false;
     let timedOut = false;
+    let aborted = false;
     let timer: NodeJS.Timeout | undefined;
+
+    const cleanup = (): void => {
+      if (timer !== undefined) clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
 
     const finish = (r: Collected): void => {
       if (settled) return;
       settled = true;
-      if (timer !== undefined) clearTimeout(timer);
+      cleanup();
       resolve(r);
     };
 
-    timer = setTimeout(() => {
-      timedOut = true;
-      // SIGKILL：不留「让它自己退」的余地。注意 kill 只负责发信号，
-      // 真正让 Promise 落地的是下面任何一个 finish 分支——只 kill 不 resolve 等于没修。
+    // 先发信号再结算：kill 只负责发信号，让 Promise 落地的永远是某个 finish 分支
+    const killNow = (): void => {
       child.kill('SIGKILL');
-      // 兜底：即使 close 因平台原因不触发，也要在宽限期后结算，绝不允许永久 pending
       const grace = setTimeout(() => {
-        finish({ ok: false, kind: 'timeout', detail: `SIGKILL 后 ${KILL_GRACE_MS}ms 仍未收到 close`, stdout, stderr });
+        finish({
+          ok: false,
+          kind: aborted ? 'aborted' : 'timeout',
+          detail: `SIGKILL 后 ${KILL_GRACE_MS}ms 仍未收到 close`,
+          stdout,
+          stderr,
+        });
       }, KILL_GRACE_MS);
       grace.unref();
+    };
+
+    function onAbort(): void {
+      aborted = true;
+      killNow();
+    }
+
+    timer = setTimeout(() => {
+      timedOut = true;
+      killNow();
     }, timeoutMs);
+
+    if (signal !== undefined) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
 
     child.stdout.setEncoding('utf-8');
     child.stderr.setEncoding('utf-8');
@@ -82,6 +116,11 @@ function collect(child: ChildProcessWithoutNullStreams, timeoutMs: number): Prom
     // error 兜的是「进程根本没起来」；起来了再卡住只能靠上面的超时兜
     child.on('error', (e) => finish({ ok: false, kind: 'spawn', detail: e.message, stdout, stderr }));
     child.on('close', (code) => {
+      // 取消优先于超时：两个都可能为真，但「是被人按停的」比「是自己慢」更该被报出来
+      if (aborted) {
+        finish({ ok: false, kind: 'aborted', detail: '已被取消（SIGKILL）', stdout, stderr });
+        return;
+      }
       if (timedOut) {
         finish({ ok: false, kind: 'timeout', detail: `超过 ${timeoutMs}ms 未结束，已 SIGKILL`, stdout, stderr });
         return;
@@ -166,7 +205,14 @@ export async function runGates(opts: RunGatesOptions): Promise<GateResult> {
     windowsHide: true,
   });
 
-  const collected = await collect(child, timeoutMs);
+  const collected = await collect(child, timeoutMs, opts.signal);
+  if (!collected.ok && collected.kind === 'aborted') {
+    throw new GateFailureError(
+      'aborted',
+      `gate 执行已取消：${gate} @ ${opts.bookRoot}\n`
+        + `  子进程已 SIGKILL。★本次检查**未产出结果**——上层不得把它当成「查了没问题」（绿）。`,
+    );
+  }
   if (!collected.ok) {
     const head = collected.kind === 'timeout'
       ? `gate 执行超时（${timeoutMs}ms，已 SIGKILL）`

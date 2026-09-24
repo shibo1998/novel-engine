@@ -59,7 +59,8 @@ export type LLMError =
   | { ok: false; kind: 'timeout'; detail: string }             // 超时 / 网络错误（可重试）
   | { ok: false; kind: 'http'; status: number; detail: string } // 5xx 可重试，4xx 不可
   | { ok: false; kind: 'parse'; detail: string }               // 响应解析失败（不可重试）
-  | { ok: false; kind: 'circuit-open'; detail: string };       // 熔断中：连续失败够多，冷却期内不再发请求
+  | { ok: false; kind: 'circuit-open'; detail: string }       // 熔断中：连续失败够多，冷却期内不再发请求
+  | { ok: false; kind: 'aborted'; detail: string };           // 被调用方主动取消（与 timeout 区分：不重试、不计熔断）
 
 /**
  * gate 子进程的失败分类。刻意与 LLMError 的 kind 共用词汇（'timeout' 等）：
@@ -73,7 +74,8 @@ export type GateFailureKind =
   | 'parse'            // stdout 不是合法 JSON
   | 'shape'            // JSON 结构不符契约
   | 'root'             // bookRoot 不是目录
-  | 'count-mismatch';  // 检查器扫到的章数与 state 记的章数不等（拒绝回填）
+  | 'count-mismatch'   // 检查器扫到的章数与 state 记的章数不等（拒绝回填）
+  | 'aborted';         // 被外部取消（server /cancel）：子进程已 SIGKILL，本次检查未产出结果
 
 export type LLMResult = { ok: true; text: string } | LLMError;
 

@@ -8,6 +8,7 @@ import {
   buildPrompt,
   checkChapterReadiness,
   convergeChapter,
+  GateFailureError,
   recordFeedback,
   readState,
   runGates,
@@ -135,6 +136,55 @@ function isWriteRequest(method: string, pathname: string, body: Record<string, u
   return false;
 }
 
+/**
+ * 在跑的长任务登记表（F20-2）。
+ * 为什么必须登记：前端断开连接**只是断开连接**——server 无状态、每次现读，
+ * spawn 出去的检查器与收敛循环会照跑到底，「前端点取消」纯属幻觉。
+ * 要真能停，只能由持有句柄的一侧掐掉，而能够持有句柄的只有 server。
+ * 粒度按 bookRoot：同一本书若允许并存两个长任务，「取消」到底取消了谁就说不清了。
+ */
+interface InflightTask {
+  controller: AbortController;
+  label: string;
+  startedAt: number;
+}
+const inflight = new Map<string, InflightTask>();
+
+function beginTask(bookRoot: string, label: string): AbortController {
+  const existing = inflight.get(bookRoot);
+  if (existing !== undefined) {
+    throw new HttpError(
+      409,
+      `该书已有任务在跑：${existing.label}`
+        + `（已 ${Math.round((Date.now() - existing.startedAt) / 1000)}s）。先取消它，或等它结束。`,
+    );
+  }
+  const controller = new AbortController();
+  inflight.set(bookRoot, { controller, label, startedAt: Date.now() });
+  return controller;
+}
+
+function endTask(bookRoot: string, controller: AbortController): void {
+  if (inflight.get(bookRoot)?.controller === controller) inflight.delete(bookRoot);
+}
+
+/**
+ * 取消导致的失败**绝不能**长得像正常结果。
+ * 这里返回 cancelled:true 且**一个 findings 字段都不带**——
+ * 空的 findings 与「查完没问题」在本项目里形状无法区分，正是最要命的那类混淆。
+ */
+function sendIfCancelled(res: ServerResponse, e: unknown, bookRoot: string): boolean {
+  if (e instanceof GateFailureError && e.kind === 'aborted') {
+    send(res, 200, {
+      cancelled: true,
+      bookRoot,
+      note: '本请求已被取消，未产出 gate 结果（不要当成「查了没问题」）',
+    });
+    return true;
+  }
+  return false;
+}
+
 function requireChapterNo(v: unknown): number {
   const n = typeof v === 'number' ? v : Number(v);
   if (!Number.isInteger(n) || n <= 0) throw new Error('chapterNo 缺失或不是正整数');
@@ -171,11 +221,41 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'GET' && url.pathname === '/tasks') {
+      // 只读、只报告在跑的任务。给前端用来区分「我这儿在等」和「服务端确实还在跑」（F20-1）：
+      // 少了这个，一次卡死与一次正常长跑在界面上长得一模一样。
+      send(res, 200, {
+        tasks: [...inflight.entries()].map(([bookRoot, t]) => ({
+          bookRoot,
+          label: t.label,
+          startedAt: new Date(t.startedAt).toISOString(),
+          elapsedMs: Date.now() - t.startedAt,
+        })),
+      });
+      return;
+    }
+
     if (req.method === 'POST' || req.method === 'PUT') {
       const body = await readJsonBody(req);
       const bookRoot = resolveBookRoot(body['bookRoot']);
       // 写盘类路由统一在此拦下（含 /gates?write=true 这种「看着像读」的）
       if (isWriteRequest(req.method, url.pathname, body)) requireWriteEnabled();
+
+      if (url.pathname === '/cancel') {
+        // 取消是**改服务端内存状态**，不落盘，所以不走写盘闸门
+        const target = inflight.get(bookRoot);
+        if (target === undefined) {
+          send(res, 200, { cancelled: false, note: '该书当前没有在跑的任务' });
+          return;
+        }
+        target.controller.abort();
+        send(res, 200, {
+          cancelled: true,
+          label: target.label,
+          note: '已发出取消信号：检查器会被 SIGKILL，收敛循环会在下一个可中断点停下',
+        });
+        return;
+      }
 
       if (req.method === 'PUT' && url.pathname === '/chapter') {
         const chapterNo = requireChapterNo(body['chapterNo']);
@@ -236,30 +316,48 @@ const server = createServer(async (req, res) => {
 
       if (url.pathname === '/generate') {
         const chapterNo = requireChapterNo(body['chapterNo']);
-        const readiness = await checkChapterReadiness(bookRoot, chapterNo);
-        const generation = await convergeChapter({ bookRoot, chapterNo });
-        // ★顺序不能换（F17）：读 state → 取**跑前** mtime 快照 → 跑 gate → 回填
-        const state = await readState({ bookRoot, skipStaleSweep: true });
-        const mtimeSnapshot = await snapshotChapterMtimes(bookRoot, state.chapters);
-        const result = await runGates({ bookRoot });
-        await applyGateResult(state, result, { mtimeSnapshot });
-        await writeState(state);
-        send(res, 200, { ...result, state, generation, readiness: publicReadiness(readiness) });
+        const task = beginTask(bookRoot, `收敛第 ${chapterNo} 章`);
+        try {
+          const readiness = await checkChapterReadiness(bookRoot, chapterNo);
+          const generation = await convergeChapter({ bookRoot, chapterNo, signal: task.signal });
+          // ★顺序不能换（F17）：读 state → 取**跑前** mtime 快照 → 跑 gate → 回填
+          const state = await readState({ bookRoot, skipStaleSweep: true });
+          const mtimeSnapshot = await snapshotChapterMtimes(bookRoot, state.chapters);
+          const result = await runGates({ bookRoot, signal: task.signal });
+          await applyGateResult(state, result, { mtimeSnapshot });
+          await writeState(state);
+          send(res, 200, { ...result, state, generation, readiness: publicReadiness(readiness) });
+        } catch (e) {
+          if (sendIfCancelled(res, e, bookRoot)) return;
+          throw e;
+        } finally {
+          endTask(bookRoot, task);
+        }
         return;
       }
 
       if (url.pathname === '/gates') {
-        if (body['write'] === true) {
-          // ★顺序不能换（F17）：读 state → 取**跑前** mtime 快照 → 跑 gate → 回填
-          const state = await readState({ bookRoot, skipStaleSweep: true });
-          const mtimeSnapshot = await snapshotChapterMtimes(bookRoot, state.chapters);
-          const result = await runGates({ bookRoot });
-          await applyGateResult(state, result, { mtimeSnapshot });
-          await writeState(state);
-          send(res, 200, { ...result, state });
-          return;
+        // /gates 两种模式都会 spawn 检查器（都很慢），统一登记成可取消任务；
+        // 只读预览也登记——否则「取消」按钮对它按不动。
+        const task = beginTask(bookRoot, body['write'] === true ? '过闸并回填' : '过闸（只读）');
+        try {
+          if (body['write'] === true) {
+            // ★顺序不能换（F17）：读 state → 取**跑前** mtime 快照 → 跑 gate → 回填
+            const state = await readState({ bookRoot, skipStaleSweep: true });
+            const mtimeSnapshot = await snapshotChapterMtimes(bookRoot, state.chapters);
+            const result = await runGates({ bookRoot, signal: task.signal });
+            await applyGateResult(state, result, { mtimeSnapshot });
+            await writeState(state);
+            send(res, 200, { ...result, state });
+            return;
+          }
+          send(res, 200, await runGates({ bookRoot, signal: task.signal }));
+        } catch (e) {
+          if (sendIfCancelled(res, e, bookRoot)) return;
+          throw e;
+        } finally {
+          endTask(bookRoot, task);
         }
-        send(res, 200, await runGates({ bookRoot }));
         return;
       }
     }

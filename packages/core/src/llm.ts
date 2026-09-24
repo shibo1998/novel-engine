@@ -90,7 +90,8 @@ export async function callLLM(b: PromptBundle, o: CallLLMOptions = {}): Promise<
 
   const attempt = async (): Promise<LLMResult> => {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, TIMEOUT_MS);
     const onExternalAbort = (): void => ctrl.abort();
     if (o.signal !== undefined) {
       if (o.signal.aborted) ctrl.abort();
@@ -128,6 +129,11 @@ export async function callLLM(b: PromptBundle, o: CallLLMOptions = {}): Promise<
       }
       return { ok: true, text: content };
     } catch (e) {
+      // 主动取消 ≠ 超时：两者在 fetch 层都表现为 reject，但后续处理完全不同——
+      // 取消不该重试、不该计入熔断、也不该被报成「服务慢」（F20-2）。
+      if (!timedOut && o.signal?.aborted === true) {
+        return { ok: false, kind: 'aborted', detail: '已被调用方取消' };
+      }
       return { ok: false, kind: 'timeout', detail: e instanceof Error ? e.message : String(e) };
     } finally {
       clearTimeout(timer);

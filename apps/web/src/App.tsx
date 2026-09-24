@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchChapter, fetchState, getToken, postJson, putJson, setToken } from './api.js';
+import { fetchChapter, fetchState, fetchTasks, getToken, postCancel, postJson, putJson, setToken } from './api.js';
 import type { ChapterEntry, ChapterReadiness, GateFinding, GateReport, GenerationReport } from './api.js';
 
 const WORST_COLOR: Record<string, string> = {
@@ -27,6 +27,9 @@ export function App(): React.JSX.Element {
   const [token, setTokenState] = useState<string>(() => getToken());
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState<string>('');
+  /** 本次请求的起始时刻（F20-1）：「忙」和「卡」在界面上必须长得不一样 */
+  const [busySince, setBusySince] = useState<number | null>(null);
+  const [tick, setTick] = useState<number>(() => Date.now());
   const [notice, setNotice] = useState<string>('');
   const [gateFindings, setGateFindings] = useState<GateFinding[] | null>(null);
   const [readiness, setReadiness] = useState<ChapterReadiness | null>(null);
@@ -42,13 +45,40 @@ export function App(): React.JSX.Element {
     queryFn: () => fetchState(bookRoot),
     enabled: bookRoot.trim() !== '',
     refetchInterval: 5000,
+    // F20-5：解析失败（含读到半写文件的瞬时窗口）就重拉，**不要**渲染成空态——
+    // 空态看起来像「数据丢了」，而它其实只是「这一次没读全」。
+    retry: 2,
+    retryDelay: 400,
   });
 
   const chapterQuery = useQuery({
     queryKey: ['chapter', bookRoot, selected, token],
     queryFn: () => fetchChapter(bookRoot, selected!),
     enabled: bookRoot.trim() !== '' && selected !== null,
+    retry: 2,
+    retryDelay: 400,
   });
+
+  // 服务端在跑什么（F20-1）：本地 busy 只能说明「这个标签页在等」，
+  // 不能说明后端还在推进——卡死与正常长跑在只有本地状态时看起来一模一样。
+  const tasksQuery = useQuery({
+    queryKey: ['tasks', token],
+    queryFn: fetchTasks,
+    enabled: token.trim() !== '',
+    // 忙的时候密一点（要能立刻看到「服务端确实在跑」），空闲时几乎不打
+    refetchInterval: busy !== '' ? 1500 : 8000,
+  });
+  const serverTask = tasksQuery.data?.tasks.find((t) => t.bookRoot === bookRoot);
+
+  // 每秒走一格：让等待时长可见。没有这个，超过三五秒的请求与卡死无法区分。
+  useEffect(() => {
+    if (busy === '') return;
+    const id = window.setInterval(() => setTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [busy]);
+  const elapsedSec = busySince === null ? 0 : Math.max(0, Math.round((tick - busySince) / 1000));
+  /** 阈值：超过它就把「已等待 N 秒」显示出来，而不是继续只转圈 */
+  const SLOW_THRESHOLD_SEC = 5;
 
   useEffect(() => {
     const chapter = chapterQuery.data;
@@ -72,6 +102,8 @@ export function App(): React.JSX.Element {
 
   const runAction = async (label: string, fn: () => Promise<unknown>): Promise<void> => {
     setBusy(label);
+    setBusySince(Date.now());
+    setTick(Date.now());
     setNotice('');
     try {
       await fn();
@@ -80,12 +112,41 @@ export function App(): React.JSX.Element {
       alert(`${label} 失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy('');
+      setBusySince(null);
+      // 任务刚结束就刷一次任务表，别让「取消」按钮多留一会儿显得后端还在跑
+      void queryClient.invalidateQueries({ queryKey: ['tasks', token] });
     }
+  };
+
+  /**
+   * 取消**后端**任务（F20-2）。
+   * 这里刻意不走 runAction：取消是射向服务端的信号，不是一个「本地在忙」的请求，
+   * 把它塞进 busy 态会让「取消」本身看起来像另一个卡住的请求。
+   */
+  const cancelTask = (): void => {
+    void (async () => {
+      try {
+        const r = await postCancel(bookRoot);
+        setNotice(r.cancelled ? `已发出取消信号：${r.label ?? ''}` : r.note);
+      } catch (e) {
+        alert(`取消失败：${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        await queryClient.invalidateQueries({ queryKey: ['tasks', token] });
+        await refreshState();
+      }
+    })();
   };
 
   const runGates = (): void => {
     void runAction('过闸', async () => {
       const report = await postJson<GateReport>('/gates', { bookRoot, write: true });
+      if (report.cancelled === true) {
+        // ★取消不产出结果：这里绝不能顺手去读 report.findings（它压根不在），
+        // 清掉旧结果并说明，比留着一份「上一次的绿」安全。
+        setGateFindings(null);
+        setNotice('本次过闸已被取消，未产出结果（不是「查了没问题」）。');
+        return;
+      }
       setGateFindings(report.findings);
       setNotice(`门禁完成：共 ${report.findings.length} 条发现。`);
     });
@@ -102,6 +163,11 @@ export function App(): React.JSX.Element {
   const runGenerate = (): void => {
     void runAction('生成并收敛', async () => {
       const report = await postJson<GenerationReport>('/generate', { bookRoot, chapterNo: targetChapterNo });
+      if (report.cancelled === true) {
+        setGateFindings(null);
+        setNotice('本次生成已被取消，未产出结果。');
+        return;
+      }
       const updatedChapter = await fetchChapter(bookRoot, report.generation.file);
       setGateFindings(report.findings);
       setReadiness(report.readiness);
@@ -111,7 +177,10 @@ export function App(): React.JSX.Element {
       setLoadedKey(`${bookRoot}\0${updatedChapter.file}`);
       queryClient.setQueryData(['chapter', bookRoot, updatedChapter.file, token], updatedChapter);
       setSelected(report.generation.file);
-      setNotice(`第 ${targetChapterNo} 章：${report.generation.stopped}，门禁发现 ${report.findings.length} 项。`);
+      setNotice(
+        `第 ${targetChapterNo} 章：${report.generation.stopped}，门禁发现 ${report.findings.length} 项，`
+          + `LLM 请求 ${report.generation.llmCalls} 次。`,
+      );
     });
   };
 
@@ -156,6 +225,20 @@ export function App(): React.JSX.Element {
       if (!result.ok) throw new Error(result.detail ?? '摘要生成失败');
       setNotice(`第 ${selectedEntry.chapterNo} 章摘要已更新。`);
     });
+  };
+
+  /**
+   * 状态行（F20-1）。要回答的问题只有一个：现在是「在忙」还是「卡住了」。
+   * 判据分开摆：本地等了多久 + 服务端有没有在跑的任务。
+   * 两者对不上（本地等很久、服务端说没任务）本身就是最值得报警的一种状态。
+   */
+  const statusLine = (): string => {
+    if (busy === '') return dirty ? '正文有未保存改动' : notice;
+    const waited = elapsedSec >= SLOW_THRESHOLD_SEC ? `已等待 ${elapsedSec} 秒` : '';
+    const server = serverTask !== undefined
+      ? `服务端在跑「${serverTask.label}」${Math.round(serverTask.elapsedMs / 1000)}s`
+      : (elapsedSec >= SLOW_THRESHOLD_SEC ? '⚠️ 服务端未报告在跑的任务（连接断了？后端异常退出？）' : '');
+    return [`${busy}中…`, waited, server].filter((s) => s !== '').join(' · ');
   };
 
   const reportFindings = (): React.ReactNode => {
@@ -241,8 +324,15 @@ export function App(): React.JSX.Element {
             记录改稿反馈
           </button>
           <button disabled={busy !== '' || selectedEntry === undefined || dirty} onClick={updateSummary}>更新本章摘要</button>
+          <button
+            disabled={serverTask === undefined && busy === ''}
+            onClick={cancelTask}
+            title="取消服务端正在跑的长任务。前端 abort 只能断开这条连接——server 无状态、每次现读，spawn 出去的检查器会照跑到底。"
+          >
+            取消后端任务
+          </button>
           <span style={{ fontSize: 12, color: dirty ? '#ef6c00' : '#666', alignSelf: 'center' }}>
-            {busy || (dirty ? '正文有未保存改动' : notice)}
+            {statusLine()}
           </span>
         </div>
         {readiness !== null && readiness.warnings.length > 0 && (

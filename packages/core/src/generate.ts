@@ -74,13 +74,19 @@ export interface ConvergeOptions {
   /** 默认 3，上限防死循环烧 token */
   maxRounds?: number;
   llm?: CallLLMOptions;
+  /**
+   * 外部取消（F20-2）。透传给 runGates（SIGKILL 检查器子进程）与 callLLM（abort HTTP），
+   * 并在每轮开始时检查一次。没有它，前端点「取消」只能断开连接，
+   * server 侧的无状态 spawn 照样跑完——那正是这条问卷里最容易被误判的一条。
+   */
+  signal?: AbortSignal;
 }
 
 export interface ConvergeRound {
   round: number;
   findings: number;
   worst: string;
-  action: 'stop-clean' | 'stop-inconsistent' | 'revise' | 'stop-llm-error';
+  action: 'stop-clean' | 'stop-inconsistent' | 'revise' | 'stop-llm-error' | 'stop-aborted';
   llmError?: LLMResult;
 }
 
@@ -90,7 +96,7 @@ export interface ConvergeResult {
   drafted: boolean;
   rounds: ConvergeRound[];
   finalWorst: string;
-  stopped: 'clean' | 'max-rounds' | 'llm-error' | 'draft-failed' | 'gate-inconsistent';
+  stopped: 'clean' | 'max-rounds' | 'llm-error' | 'draft-failed' | 'gate-inconsistent' | 'aborted';
   draftError?: LLMResult;
   /**
    * 本次实际发出的 LLM 请求次数上限（F15）。
@@ -111,6 +117,8 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
   const root = path.resolve(o.bookRoot);
   const maxRounds = o.maxRounds ?? 3;
   const file = chapterFileName(o.chapterNo);
+  // 取消信号并进 llm 选项：外部 signal 优先（显式取消 > 调用方自带的 signal）
+  const llmOpts: CallLLMOptions = { ...o.llm, ...(o.signal !== undefined ? { signal: o.signal } : {}) };
 
   let state = await readState({ bookRoot: root });
   let drafted = false;
@@ -121,7 +129,7 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
     const w = await writeChapter({
       bookRoot: root,
       chapterNo: o.chapterNo,
-      ...(o.llm !== undefined ? { llm: o.llm } : {}),
+      llm: llmOpts,
     });
     if (!w.ok) {
       return {
@@ -142,12 +150,18 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
   let finalWorst = 'unknown';
 
   for (let i = 1; i <= maxRounds; i++) {
+    // 每轮先看取消（F20-2）：取消是「外部决定」，必须在动 LLM 之前就生效
+    if (o.signal?.aborted === true) {
+      rounds.push({ round: i, findings: 0, worst: 'unknown', action: 'stop-aborted' });
+      stopped = 'aborted';
+      break;
+    }
     // ★三步顺序不能换（F17）：先读 state → 再取**跑前** mtime 快照 → 最后才跑 gate 并回填。
     // 旧版是「跑完再 stat 回填」：本轮（或上一轮刚改写）变更的 mtime 会被当成「已检」，
     // 形成假绿窗口。只认快照值后，跑期间被改的章会在下次 readState 清扫时回到待检。
     state = await readState({ bookRoot: root, skipStaleSweep: true });
     const mtimeSnapshot = await snapshotChapterMtimes(root, state.chapters);
-    const gateResult = await runGates({ bookRoot: root });
+    const gateResult = await runGates({ bookRoot: root, ...(o.signal !== undefined ? { signal: o.signal } : {}) });
     const chapterFindings = gateResult.findings.filter((f) => f.chapter === file);
     await applyGateResult(state, gateResult, { mtimeSnapshot });
     await writeState(state);
@@ -176,10 +190,18 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
 
     const bundle = await buildPrompt({ bookRoot: root, chapterNo: o.chapterNo, mode: 'revise', findings: chapterFindings });
     llmCalls += 1;
-    const r = await callLLM(bundle, o.llm);
+    const r = await callLLM(bundle, llmOpts);
     if (!r.ok) {
-      rounds.push({ round: i, findings: chapterFindings.length, worst, action: 'stop-llm-error', llmError: r });
-      stopped = 'llm-error';
+      // 取消与「LLM 失败」分开记：前者是用户按的，后者是要排查的故障（F20-2）
+      const cancelled = r.kind === 'aborted';
+      rounds.push({
+        round: i,
+        findings: chapterFindings.length,
+        worst,
+        action: cancelled ? 'stop-aborted' : 'stop-llm-error',
+        llmError: r,
+      });
+      stopped = cancelled ? 'aborted' : 'llm-error';
       break;
     }
     await atomicWriteText(path.join(root, 'chapters', file), r.text);

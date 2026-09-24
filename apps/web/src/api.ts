@@ -32,6 +32,26 @@ export interface GateReport {
   findings: GateFinding[];
   counts: Record<string, number>;
   state?: StoryState;
+  /**
+   * 服务端 /cancel 的产物（F20-2）。带这个标记时**没有 findings 字段**——
+   * 一次空的 findings 与「查完没问题」形状相同，前端必须先判 cancelled。
+   */
+  cancelled?: true;
+  note?: string;
+}
+
+/** 服务端在跑的长任务（F20-1）：用来区分「我这儿在等」与「服务端确实还在跑」。 */
+export interface InflightTask {
+  bookRoot: string;
+  label: string;
+  startedAt: string;
+  elapsedMs: number;
+}
+
+export interface CancelResult {
+  cancelled: boolean;
+  label?: string;
+  note: string;
 }
 
 export interface ChapterReadiness {
@@ -47,6 +67,8 @@ export interface GenerationReport extends GateReport {
     drafted: boolean;
     finalWorst: string;
     stopped: string;
+    /** 本次实际发出的 LLM 请求数（F15）：把「轮数 × 重试层数」的乘积摊开给人看 */
+    llmCalls: number;
     rounds: Array<{ round: number; findings: number; worst: string; action: string }>;
   };
 }
@@ -113,3 +135,15 @@ export const putJson = <T>(path: string, body: unknown): Promise<T> =>
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   }).then((r) => j<T>(r));
+
+/** 查服务端在跑什么长任务（F20-1）。附带把 true 作为 `cancelled` 判定的来源。 */
+export const fetchTasks = (): Promise<{ tasks: InflightTask[] }> =>
+  fetch('/api/tasks', { headers: authHeaders() }).then((r) => j<{ tasks: InflightTask[] }>(r));
+
+/**
+ * 取消后端长任务（F20-2）。
+ * ★必须由 server 侧取消：前端 abort 只能断掉这条 HTTP 连接，
+ * server 无状态、每次现读，spawn 出去的检查器会照跑到底。
+ */
+export const postCancel = (bookRoot: string): Promise<CancelResult> =>
+  postJson<CancelResult>('/cancel', { bookRoot });
