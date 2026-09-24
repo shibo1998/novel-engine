@@ -51,35 +51,65 @@ export interface GenerationReport extends GateReport {
   };
 }
 
+const TOKEN_KEY = 'novel.token';
+
+/**
+ * 服务端启动时会把 token 打到日志里。这里只做本地保存 + 统一注入，
+ * 不散在每个调用点——请求头漏一个就是一个 401。
+ */
+export function getToken(): string {
+  return localStorage.getItem(TOKEN_KEY) ?? '';
+}
+
+export function setToken(token: string): void {
+  if (token === '') localStorage.removeItem(TOKEN_KEY);
+  else localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function authHeaders(base: Record<string, string> = {}): Record<string, string> {
+  const token = getToken();
+  return token === '' ? base : { ...base, Authorization: `Bearer ${token}` };
+}
+
 async function j<T>(r: Response): Promise<T> {
-  const payload: unknown = await r.json();
+  let payload: unknown;
+  try {
+    payload = await r.json();
+  } catch {
+    // 解析失败（含半写窗口）不能渲染成空态——空态看起来像「数据丢了」，
+    // 抛出去让 React Query 重拉，才是对瞬时窗口正确的反应。
+    throw new Error(`HTTP ${r.status}：响应不是合法 JSON（可能是读到了半写文件，稍后重试）`);
+  }
   if (!r.ok) {
     const error = typeof payload === 'object' && payload !== null && 'error' in payload
       ? String((payload as { error: unknown }).error)
       : `HTTP ${r.status}`;
+    if (r.status === 401) throw new Error(`未授权：请在左上方填入服务端日志里的 token（${error}）`);
     throw new Error(error);
   }
   return payload as T;
 }
 
 export const fetchState = (bookRoot: string): Promise<StoryState> =>
-  fetch(`/api/state?bookRoot=${encodeURIComponent(bookRoot)}`).then((r) => j<StoryState>(r));
+  fetch(`/api/state?bookRoot=${encodeURIComponent(bookRoot)}`, { headers: authHeaders() }).then((r) =>
+    j<StoryState>(r),
+  );
 
 export const fetchChapter = (bookRoot: string, file: string): Promise<{ file: string; text: string }> =>
-  fetch(`/api/chapter?bookRoot=${encodeURIComponent(bookRoot)}&file=${encodeURIComponent(file)}`).then((r) =>
-    j<{ file: string; text: string }>(r),
-  );
+  fetch(`/api/chapter?bookRoot=${encodeURIComponent(bookRoot)}&file=${encodeURIComponent(file)}`, {
+    headers: authHeaders(),
+  }).then((r) => j<{ file: string; text: string }>(r));
 
 export const postJson = <T>(path: string, body: unknown): Promise<T> =>
   fetch(`/api${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   }).then((r) => j<T>(r));
 
 export const putJson = <T>(path: string, body: unknown): Promise<T> =>
   fetch(`/api${path}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   }).then((r) => j<T>(r));

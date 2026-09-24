@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchChapter, fetchState, postJson, putJson } from './api.js';
+import { fetchChapter, fetchState, getToken, postJson, putJson, setToken } from './api.js';
 import type { ChapterEntry, ChapterReadiness, GateFinding, GateReport, GenerationReport } from './api.js';
 
 const WORST_COLOR: Record<string, string> = {
@@ -23,6 +23,8 @@ function Badge({ ch }: { ch: ChapterEntry }): React.JSX.Element {
 
 export function App(): React.JSX.Element {
   const [bookRoot, setBookRoot] = useState<string>(() => localStorage.getItem('novel.bookRoot') ?? '');
+  // 服务端现在强制鉴权；token 存本地，改它即触发上面的 query 重拉（key 里带上 token）
+  const [token, setTokenState] = useState<string>(() => getToken());
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState<string>('');
   const [notice, setNotice] = useState<string>('');
@@ -35,14 +37,15 @@ export function App(): React.JSX.Element {
   const queryClient = useQueryClient();
 
   const stateQuery = useQuery({
-    queryKey: ['state', bookRoot],
+    // token 进 queryKey：改 token 后必须重拉，否则会一直显示上个 token 的错误
+    queryKey: ['state', bookRoot, token],
     queryFn: () => fetchState(bookRoot),
     enabled: bookRoot.trim() !== '',
     refetchInterval: 5000,
   });
 
   const chapterQuery = useQuery({
-    queryKey: ['chapter', bookRoot, selected],
+    queryKey: ['chapter', bookRoot, selected, token],
     queryFn: () => fetchChapter(bookRoot, selected!),
     enabled: bookRoot.trim() !== '' && selected !== null,
   });
@@ -58,7 +61,7 @@ export function App(): React.JSX.Element {
     setBaselineText(chapter.text);
   }, [bookRoot, chapterQuery.data, loadedKey]);
 
-  const refreshState = (): Promise<void> => queryClient.invalidateQueries({ queryKey: ['state', bookRoot] });
+  const refreshState = (): Promise<void> => queryClient.invalidateQueries({ queryKey: ['state', bookRoot, token] });
   const selectedEntry = stateQuery.data?.chapters.find((chapter) => chapter.file === selected);
   const nextChapterNo = (stateQuery.data?.chapters.reduce((max, chapter) => Math.max(max, chapter.chapterNo), 0) ?? 0) + 1;
   const targetChapterNo = selectedEntry?.chapterNo ?? nextChapterNo;
@@ -106,7 +109,7 @@ export function App(): React.JSX.Element {
       setSavedText(updatedChapter.text);
       setBaselineText(updatedChapter.text);
       setLoadedKey(`${bookRoot}\0${updatedChapter.file}`);
-      queryClient.setQueryData(['chapter', bookRoot, updatedChapter.file], updatedChapter);
+      queryClient.setQueryData(['chapter', bookRoot, updatedChapter.file, token], updatedChapter);
       setSelected(report.generation.file);
       setNotice(`第 ${targetChapterNo} 章：${report.generation.stopped}，门禁发现 ${report.findings.length} 项。`);
     });
@@ -123,7 +126,7 @@ export function App(): React.JSX.Element {
       setDraftText(saved.text);
       setSavedText(saved.text);
       setGateFindings(null);
-      queryClient.setQueryData(['chapter', bookRoot, saved.file], saved);
+      queryClient.setQueryData(['chapter', bookRoot, saved.file, token], saved);
       setNotice('正文已保存；旧门禁结果已失效，请重新检查。');
     });
   };
@@ -185,6 +188,16 @@ export function App(): React.JSX.Element {
               setDraftText('');
               setSavedText('');
               setBaselineText('');
+            }}
+          />
+          <input
+            type="password"
+            style={{ width: '100%', boxSizing: 'border-box', marginTop: 6 }}
+            placeholder="服务端 token（见启动日志）"
+            value={token}
+            onChange={(e) => {
+              setTokenState(e.target.value);
+              setToken(e.target.value);
             }}
           />
           <div style={{ fontSize: 12, color: '#666', marginTop: 6 }}>
