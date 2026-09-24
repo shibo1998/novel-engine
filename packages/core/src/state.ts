@@ -1,5 +1,6 @@
 import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { GateFailureError } from './gates.js';
 import type { ChapterIndexEntry, GateResult, GateSeverity, GateStatus, StoryState } from './types.js';
 
 /**
@@ -153,9 +154,23 @@ export async function writeState(state: StoryState): Promise<void> {
  * runGates 是全量扫描：未命中 findings 的章 = 本次检查通过，必须置 clean（防上一轮严重度残留）。
  * 命中章与 clean 章共享同一批 checkedAt；checkedMtimeMs 取当前文件 mtime（内容指纹）。
  * 返回本批 checkedAt。
+ *
+ * ★回填前先对账（F12 落点 2）：检查器扫到的章数必须等于 state 的章数，否则**拒绝回填**。
+ * 为什么必须挡在这里：检查器协议里「什么都没查到」与「查了没问题」是同一个形状
+ * （findings 为空 + exit 0），而下面的循环对「没命中 findings 的章」一律置 clean——
+ * 少了这道对账，一次「零章」的检查就会把全书刷成绿色，比不检查更危险。
  */
 export async function applyGateResult(state: StoryState, result: GateResult): Promise<string> {
   const root = path.resolve(state.bookRoot);
+  if (result.chapter_count !== state.chapters.length) {
+    throw new GateFailureError(
+      'count-mismatch',
+      `拒绝回填：检查器扫到 ${result.chapter_count} 章，state 记了 ${state.chapters.length} 章。\n` +
+        `  两处口径必须相等才敢刷 gateStatus，否则「查不到」会被写成「全绿」。\n` +
+        `  排查方向：①书根是否指错（result.book_root=${result.book_root}；state.bookRoot=${state.bookRoot}）；\n` +
+        `  ②book.json 的 paths.chapters 是否与 TS 侧硬编码的 'chapters' 不一致。`,
+    );
+  }
   const summary = summarizeGateResult(result);
   const checkedAt = new Date().toISOString();
   for (const ch of state.chapters) {

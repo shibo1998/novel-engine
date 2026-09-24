@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync, type Stats } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GateFailureKind, GateResult, GateSeverity } from './types.js';
 
@@ -127,6 +128,23 @@ export async function runGates(opts: RunGatesOptions): Promise<GateResult> {
   const py = opts.python ?? process.env['NOVEL_PYTHON'] ?? (process.platform === 'win32' ? 'python' : 'python3');
   const gate = opts.gate ?? 'consistency_check';
   const timeoutMs = resolveTimeoutMs(opts.timeoutMs);
+  // 书根先归一 + 必须是目录：态度照抄 readState（同样 resolve + isDirectory），
+  // 不让同一个仓里出现「core 一条路一种标准、spawn 这条路另一种标准」。
+  // 不校验的后果正是 F12 假绿链的起点：--root 打错一层照样 spawn 成功，
+  // 检查器扫到 0 章、findings 为空、exit 0，上层拿到空数组就把所有章刷成 clean。
+  const bookRoot = path.resolve(opts.bookRoot);
+  let rootStat: Stats | null = null;
+  try {
+    rootStat = statSync(bookRoot);
+  } catch {
+    rootStat = null;
+  }
+  if (rootStat === null || !rootStat.isDirectory()) {
+    throw new GateFailureError(
+      'root',
+      `bookRoot 不是目录（--root 打错一层？）：${bookRoot}\n  原始入参：${opts.bookRoot}`,
+    );
+  }
   // 路径层级钉注：本文件编译产物位于 packages/core/dist/，new URL 上溯三级 = 仓库根。
   // 若修改 tsconfig 的 outDir 或包目录深度，必须同步此处，否则会静默指到错误位置。
   const gatePath = fileURLToPath(new URL(`../../../gates/${gate}.py`, import.meta.url));
@@ -142,7 +160,7 @@ export async function runGates(opts: RunGatesOptions): Promise<GateResult> {
     );
   }
   // 检查器书根只认 --root 开关；位置参数会被当成章节白名单（实测：exit 2）
-  const child = spawn(py, [gatePath, '--root', opts.bookRoot], {
+  const child = spawn(py, [gatePath, '--root', bookRoot], {
     // 不加 PYTHONIOENCODING=utf-8，findings 里的中文在 Windows 上会变 gbk 乱码
     env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
     windowsHide: true,

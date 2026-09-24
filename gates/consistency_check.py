@@ -14,8 +14,11 @@
     python <kit>/tools/consistency_check.py ch-08 ch-10        # 只查指定章
     python <kit>/tools/consistency_check.py --list-checks      # 打印机检项清单
     python <kit>/tools/consistency_check.py --root <书目录>    # 指定项目
-输出：控制台摘要 + notes/对账-YYYY-MM-DD.md
-退出码：0=跑完（有问题也返回 0，问题数由摘要行体现，供 preflight 解析）
+输出：控制台摘要（stderr）+ 最终 JSON（stdout）
+退出码：0=跑完（有问题也返回 0，问题数由摘要行体现，供上层解析）
+        2=这次检查**根本没发生**（书根指错 / 配置不合法 / 筛选没匹配到任何章）。
+          此时 stdout 仍会给出书级 finding（如 no-chapters-found），但退出码与
+          「跑完且没问题」明确区分——「什么都没查到」绝不许长得像「查了没问题」。
 """
 import json
 import os
@@ -789,6 +792,29 @@ def suggest_rhythm(book, argv):
 
 # ------------------------------------------------------------------ 入口
 
+def fail_no_chapters(book, check_id, detail):
+    """书级失败关闭：输出显式 error finding + 非 0 退出码（F12 落点 3）。
+
+    为什么必须改退出码：本脚本的契约是「0=跑完（有问题也返回 0）」，
+    于是「一章都没扫到」和「扫完没发现问题」在协议上是同一个形状——
+    上层拿到空 findings 就会把 state 里所有章刷成 clean。零章不是「没问题」，
+    是「这次检查根本没发生」，两者必须在退出码上分开。
+    """
+    _ep(f"⛔ {detail}")
+    payload = {
+        "gate": "consistency_check",
+        "book_root": book.root,
+        "chapter_count": 0,
+        "counts": {"严重": 1, "中等": 0, "轻微": 0},
+        "findings": [
+            {"severity": "严重", "chapter": "（书）", "line": 0,
+             "check": check_id, "detail": detail},
+        ],
+    }
+    print(json.dumps(payload, ensure_ascii=False))
+    return 2
+
+
 def main():
     argv = kit.strip_root_arg(sys.argv[1:])
     book = kit.load_book(sys.argv[1:])
@@ -813,6 +839,14 @@ def main():
           and a != tag and not a.isdigit()]
     chapters = book.chapter_files()
 
+    # 零章：目录不存在 / 命名不符 file_regex / 书根打错一层，都落在这里。
+    # 这是 F12 那条假绿链的源头，必须在书级直接失败关闭（见 fail_no_chapters）。
+    if not chapters:
+        return fail_no_chapters(
+            book, "no-chapters-found",
+            f"未找到任何章节：{book.chapters_dir} 不存在，"
+            f"或其中没有匹配 {book.file_regex.pattern} 的 .md")
+
     # --since N：只扫最近 N 章。给钩子/长书场景用——全量扫描会随章数线性变慢，
     # 钩子有宿主超时，书越长越容易静默失效。
     since = opt("--since")
@@ -824,6 +858,13 @@ def main():
         chapters = [(n, fn, t) for n, fn, t in chapters
                     if fn in wl or fn.replace(".md", "") in wl
                     or any(fn.startswith(w) for w in wl)]
+        # 书里有章、但筛选一个都没匹配上：同样属于「这次检查没发生」。
+        # 章名敲错一个字母的静默全绿，与零章是同一种病。
+        if not chapters:
+            return fail_no_chapters(
+                book, "no-chapters-matched",
+                f"书里有章节，但给定的筛选条件没有匹配到任何一章：{' '.join(wl)}"
+                "（章名是否敲错？不加参数即全量检查）")
 
     findings = check(book, chapters)
 

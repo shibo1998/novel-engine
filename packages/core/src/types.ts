@@ -71,7 +71,8 @@ export type GateFailureKind =
   | 'exit'             // 非 0 退出
   | 'parse'            // stdout 不是合法 JSON
   | 'shape'            // JSON 结构不符契约
-  | 'root';            // bookRoot 不是目录
+  | 'root'             // bookRoot 不是目录
+  | 'count-mismatch';  // 检查器扫到的章数与 state 记的章数不等（拒绝回填）
 
 export type LLMResult = { ok: true; text: string } | LLMError;
 
