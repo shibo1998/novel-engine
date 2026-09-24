@@ -13,6 +13,27 @@ const DEFAULT_FILE_REGEX = '^ch-(\\d+)\\.md$';
 /** 严重度权重：取该章最大值当 worst */
 const SEVERITY_WEIGHT: Record<GateSeverity, number> = { 严重: 4, 中等: 3, 轻微: 2, 提示: 1 };
 
+/**
+ * 哪些严重度算「拦截」。**提示不算**——它与 gates/consistency_check.py 的 draft_free 声明
+ * 必须一致：那里把风格类发现降为「提示」，理由写得很清楚「只报告，不计入拦截」。
+ *
+ * ★这条判据只允许一个来源。三处消费它：检查器按它降级、收敛循环按它决定是否继续改写、
+ *   批量跑按它决定是否停下写下一章。各写各的就会出现自相矛盾——
+ *   实测踩到过：检查器说「只是提示」，收敛循环却为它烧满三轮改写仍拿不到 clean，
+ *   于是每一章都停在 max-rounds，「跑完一本」根本走不完。
+ */
+export const BLOCKING_SEVERITIES: ReadonlySet<GateSeverity> = new Set<GateSeverity>(['严重', '中等', '轻微']);
+
+/**
+ * 该章是否算「过闸」。**失败关闭**：只有明确是 clean、或明确只剩提示级，才算过；
+ * 不认识的取值（拼错的严重度、上游新加的等级、undefined 变成的字符串）一律算**没过**。
+ * 写成白名单而不是「不在拦截集合里就算过」，就是为了避免「没见过的值默认放行」——
+ * 那是「查不到 = 没问题」的又一种变体。
+ */
+export function isPassingWorst(worst: string): boolean {
+  return worst === 'clean' || worst === '提示';
+}
+
 export interface ReadStateOptions {
   bookRoot: string;
   /** 强制走重建分支（CLI --rebuild 的入口）；契约两条分支不变，此开关只是绕过缓存 */

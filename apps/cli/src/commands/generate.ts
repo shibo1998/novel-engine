@@ -16,7 +16,9 @@ export function registerGenerate(program: Command): void {
       });
       process.stdout.write(JSON.stringify(result) + '\n');
       // 目标未达成且因执行错误而停（LLM 失败 / 起草失败 / 门禁状态自相矛盾）→ 非 0；
-      // clean/max-rounds 为合法结果 → 0。
+      // clean / clean-advisory（只剩提示级）/ max-rounds 为合法结果 → 0。
+      // 注意 max-rounds 也是 0：它表示「跑了上限轮仍未清空拦截级发现」，调用方
+      // （如 novel book）应据 isPassingWorst(finalWorst) 自行判停，而不是靠退出码。
       if (result.stopped === 'llm-error' || result.stopped === 'draft-failed') {
         const err = result.draftError ?? result.rounds.find((r) => r.llmError !== undefined)?.llmError;
         const kind = err !== undefined && !err.ok ? err.kind : 'unknown';

@@ -2,7 +2,7 @@ import { rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildPrompt } from './prompt.js';
 import { callLLM, type CallLLMOptions } from './llm.js';
-import { applyGateResult, readState, snapshotChapterMtimes, writeState } from './state.js';
+import { applyGateResult, BLOCKING_SEVERITIES, readState, snapshotChapterMtimes, writeState } from './state.js';
 import { runGates } from './gates.js';
 import type { LLMResult } from './types.js';
 
@@ -86,7 +86,7 @@ export interface ConvergeRound {
   round: number;
   findings: number;
   worst: string;
-  action: 'stop-clean' | 'stop-inconsistent' | 'revise' | 'stop-llm-error' | 'stop-aborted';
+  action: 'stop-clean' | 'stop-advisory' | 'stop-inconsistent' | 'revise' | 'stop-llm-error' | 'stop-aborted';
   llmError?: LLMResult;
 }
 
@@ -96,7 +96,11 @@ export interface ConvergeResult {
   drafted: boolean;
   rounds: ConvergeRound[];
   finalWorst: string;
-  stopped: 'clean' | 'max-rounds' | 'llm-error' | 'draft-failed' | 'gate-inconsistent' | 'aborted';
+  /**
+   * clean＝一条发现都没有；clean-advisory＝只剩提示级（非拦截）发现，同样算过闸；
+   * 其余值都是**没走完**，调用方必须当成失败处理（批量跑据此停下、不写下一章）。
+   */
+  stopped: 'clean' | 'clean-advisory' | 'max-rounds' | 'llm-error' | 'draft-failed' | 'gate-inconsistent' | 'aborted';
   draftError?: LLMResult;
   /**
    * 本次实际发出的 LLM 请求次数上限（F15）。
@@ -182,13 +186,28 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
       stopped = 'gate-inconsistent';
       break;
     }
-    if (isClean) {
-      rounds.push({ round: i, findings: 0, worst, action: 'stop-clean' });
-      stopped = 'clean';
+    // 过闸判据：只有**拦截级**（严重/中等/轻微）才需要继续改写。
+    // 提示级只报告——与 gates/consistency_check.py 的 draft_free 降级声明一致
+    // （那里写明「只报告，不计入拦截」）。旧版用 worst==='clean' 当唯一判据，
+    // 于是只要剩一条提示，就会连烧三轮改写仍拿不到 clean，每章都停在 max-rounds：
+    // 检查器说「只是提示」，上层却当拦截处理，两侧自相矛盾。
+    const blockingFindings = chapterFindings.filter((f) => BLOCKING_SEVERITIES.has(f.severity));
+    if (blockingFindings.length === 0) {
+      const advisoryOnly = chapterFindings.length > 0;
+      rounds.push({
+        round: i,
+        findings: chapterFindings.length,
+        worst,
+        action: advisoryOnly ? 'stop-advisory' : 'stop-clean',
+      });
+      stopped = advisoryOnly ? 'clean-advisory' : 'clean';
       break;
     }
+    // 只把拦截级问题交给模型改：提示级是给人看的，不该拿来追着模型改（那正是
+    // draft_free 要避免的「拿负向禁令惩罚自由起草」）。
+    const reviseFindings = blockingFindings;
 
-    const bundle = await buildPrompt({ bookRoot: root, chapterNo: o.chapterNo, mode: 'revise', findings: chapterFindings });
+    const bundle = await buildPrompt({ bookRoot: root, chapterNo: o.chapterNo, mode: 'revise', findings: reviseFindings });
     llmCalls += 1;
     const r = await callLLM(bundle, llmOpts);
     if (!r.ok) {

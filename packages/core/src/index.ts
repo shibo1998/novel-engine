@@ -5,7 +5,7 @@ export { callLLM, isRetryable, llmBreakerState, resetLlmBreaker } from './llm.js
 export type { CallLLMOptions } from './llm.js';
 export { runGates, GateFailureError } from './gates.js';
 export type { RunGatesOptions } from './gates.js';
-export { readState, writeState, summarizeGateResult, applyGateResult, snapshotChapterMtimes } from './state.js';
+export { readState, writeState, summarizeGateResult, applyGateResult, snapshotChapterMtimes, isPassingWorst, BLOCKING_SEVERITIES } from './state.js';
 export type { ReadStateOptions, ApplyGateResultOptions } from './state.js';
 export { writeChapter, saveChapterText, convergeChapter } from './generate.js';
 export type { WriteChapterOptions, WriteChapterResult, ConvergeOptions, ConvergeResult, ConvergeRound } from './generate.js';

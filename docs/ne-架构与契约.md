@@ -103,12 +103,16 @@
 每轮（≤3）：runGates → applyGateResult 回填落盘
   → ★自检：worst==="clean" 与 findings 为空必须同为真（不一致即 gate-inconsistent 停，
     那是回填/聚合的键对不上，属程序 bug，不许当成「没问题」放过去）
-  → worst==="clean" 停（★硬约束：不进 revise）
-  → buildPrompt(revise) → callLLM → 失败记录并停（llm-error，不吞不装成功）
+  → 无「拦截级」发现（严重/中等/轻微）即停：
+     · 一条发现都没有 → stopped="clean"
+     · 只剩提示级 → stopped="clean-advisory"（提示只报告，不驱动改写轮）
+  → buildPrompt(revise，只带拦截级发现) → callLLM → 失败记录并停（llm-error，不吞不装成功）
   → 原子覆盖 ch-NN.md
 ```
 
-CLI `generate` 的退出码：`clean/max-rounds` → 0；`llm-error/draft-failed/gate-inconsistent` → 1。
+CLI `generate` 的退出码：`clean/clean-advisory/max-rounds` → 0；`llm-error/draft-failed/gate-inconsistent` → 1。
+★「是否算过闸」的唯一判据是 `isPassingWorst(worst)`（失败关闭：只认 clean 与提示），
+批量入口 `novel book` 据此决定是否接着写下一章——不要各自再写一套。
 
 ## 7. recordFeedback 安全边界
 
