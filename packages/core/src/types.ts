@@ -60,6 +60,19 @@ export type LLMError =
   | { ok: false; kind: 'http'; status: number; detail: string } // 5xx 可重试，4xx 不可
   | { ok: false; kind: 'parse'; detail: string };              // 响应解析失败（不可重试）
 
+/**
+ * gate 子进程的失败分类。刻意与 LLMError 的 kind 共用词汇（'timeout' 等）：
+ * 本项目有两条外部调用线——LLM HTTP 与 gate 子进程——失败词汇表统一，
+ * 日志、告警、grep 才能跨两条线对齐，而不是每条线发明自己的一套说法。
+ */
+export type GateFailureKind =
+  | 'timeout'          // 子进程超时被 SIGKILL
+  | 'spawn'            // 脚本不存在 / 进程根本没起来
+  | 'exit'             // 非 0 退出
+  | 'parse'            // stdout 不是合法 JSON
+  | 'shape'            // JSON 结构不符契约
+  | 'root';            // bookRoot 不是目录
+
 export type LLMResult = { ok: true; text: string } | LLMError;
 
 /**
