@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { runGates, readState, writeState, applyGateResult } from '@novel/core';
+import { runGates, readState, writeState, applyGateResult, snapshotChapterMtimes } from '@novel/core';
 
 export function registerGates(program: Command): void {
   program
@@ -12,19 +12,20 @@ export function registerGates(program: Command): void {
       if (opts.file !== undefined) {
         throw new Error('检查器不支持单章级输入：请改用 --book <书根目录>（--file 已废弃）');
       }
-      const result = await runGates({ bookRoot: opts.book });
       if (opts.write !== true) {
         // 默认只读预览：不碰 state（与 core 无副作用、Web 可安全预览同一条原则）
-        process.stdout.write(JSON.stringify(result) + '\n');
+        process.stdout.write(JSON.stringify(await runGates({ bookRoot: opts.book })) + '\n');
         return;
       }
-      // --write：编排层副作用集中于此
+      // --write：编排层副作用集中于此。
+      // ★三步顺序不能换（F17）：先 readState → 再对每章取 mtime 快照 → 最后才跑 gate。
+      // 旧版是「跑完再 stat 回填」，于是跑期间有人改章文件时，回填进来的是**新** mtime，
+      // 等于把「跑期间的改动」算成已检（假绿窗口）。改成只认跑前快照后，跑期间的改动
+      // 会因「当前 mtime ≠ checkedMtimeMs」在下次 readState 清扫时被置 null（回到待检）。
       const state = await readState({ bookRoot: opts.book });
-      // applyGateResult 内部做的正是「跑后 stat 回填 mtime」——
-      // 注意它与 runGates 之间的窗口期：若此刻有人改章文件，回填进来的已是新 mtime，
-      // 等于把「跑期间的改动」算成已检（假绿）。彻底封死需要跑前抓快照（见下方 TODO）。
-      // TODO(假绿窗口)：runGates 前 stat 一遍 chapters/ 做快照，回填时优先用快照值而非当前 mtime。
-      const checkedAt = await applyGateResult(state, result);
+      const mtimeSnapshot = await snapshotChapterMtimes(state.bookRoot, state.chapters);
+      const result = await runGates({ bookRoot: opts.book });
+      const checkedAt = await applyGateResult(state, result, { mtimeSnapshot });
       await writeState(state);
       process.stdout.write(
         JSON.stringify({

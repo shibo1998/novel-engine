@@ -2,7 +2,7 @@ import { rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildPrompt } from './prompt.js';
 import { callLLM, type CallLLMOptions } from './llm.js';
-import { applyGateResult, readState, writeState } from './state.js';
+import { applyGateResult, readState, snapshotChapterMtimes, writeState } from './state.js';
 import { runGates } from './gates.js';
 import type { LLMResult } from './types.js';
 
@@ -130,10 +130,14 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
   let finalWorst = 'unknown';
 
   for (let i = 1; i <= maxRounds; i++) {
+    // ★三步顺序不能换（F17）：先读 state → 再取**跑前** mtime 快照 → 最后才跑 gate 并回填。
+    // 旧版是「跑完再 stat 回填」：本轮（或上一轮刚改写）变更的 mtime 会被当成「已检」，
+    // 形成假绿窗口。只认快照值后，跑期间被改的章会在下次 readState 清扫时回到待检。
+    state = await readState({ bookRoot: root });
+    const mtimeSnapshot = await snapshotChapterMtimes(root, state.chapters);
     const gateResult = await runGates({ bookRoot: root });
     const chapterFindings = gateResult.findings.filter((f) => f.chapter === file);
-    state = await readState({ bookRoot: root });
-    await applyGateResult(state, gateResult);
+    await applyGateResult(state, gateResult, { mtimeSnapshot });
     await writeState(state);
     const worst = state.chapters.find((c) => c.chapterNo === o.chapterNo)?.gateStatus?.worst ?? 'clean';
     finalWorst = worst;

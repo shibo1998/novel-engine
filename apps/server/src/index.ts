@@ -12,6 +12,7 @@ import {
   readState,
   runGates,
   saveChapterText,
+  snapshotChapterMtimes,
   updateChapterSummary,
   writeChapter,
   writeState,
@@ -237,24 +238,28 @@ const server = createServer(async (req, res) => {
         const chapterNo = requireChapterNo(body['chapterNo']);
         const readiness = await checkChapterReadiness(bookRoot, chapterNo);
         const generation = await convergeChapter({ bookRoot, chapterNo });
-        const result = await runGates({ bookRoot });
+        // ★顺序不能换（F17）：读 state → 取**跑前** mtime 快照 → 跑 gate → 回填
         const state = await readState({ bookRoot });
-        await applyGateResult(state, result);
+        const mtimeSnapshot = await snapshotChapterMtimes(bookRoot, state.chapters);
+        const result = await runGates({ bookRoot });
+        await applyGateResult(state, result, { mtimeSnapshot });
         await writeState(state);
         send(res, 200, { ...result, state, generation, readiness: publicReadiness(readiness) });
         return;
       }
 
       if (url.pathname === '/gates') {
-        const result = await runGates({ bookRoot });
         if (body['write'] === true) {
+          // ★顺序不能换（F17）：读 state → 取**跑前** mtime 快照 → 跑 gate → 回填
           const state = await readState({ bookRoot });
-          await applyGateResult(state, result);
+          const mtimeSnapshot = await snapshotChapterMtimes(bookRoot, state.chapters);
+          const result = await runGates({ bookRoot });
+          await applyGateResult(state, result, { mtimeSnapshot });
           await writeState(state);
           send(res, 200, { ...result, state });
           return;
         }
-        send(res, 200, result);
+        send(res, 200, await runGates({ bookRoot }));
         return;
       }
     }

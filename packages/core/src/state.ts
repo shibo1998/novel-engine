@@ -150,9 +150,43 @@ export async function writeState(state: StoryState): Promise<void> {
 }
 
 /**
+ * 跑 gate **之前**对每章取 mtime 快照，key = ChapterIndexEntry.file。
+ *
+ * 为什么必须在跑之前取：假绿窗口。applyGateResult 若在跑完之后才 stat 回填，
+ * 跑期间被人改过的章会拿到**新** mtime，于是「跑期间的改动」被算成已检。
+ * 先快照、回填时只认快照值，「当前 mtime ≠ checkedMtimeMs」会留给下次 readState
+ * 的过期清扫去置 null —— 判据不变，只是把「什么时候读的 mtime」挪到正确的一侧。
+ *
+ * 文件在快照时不存在 → 记 0（与 applyGateResult 的兜底同口径：0 必被判过期）。
+ */
+export async function snapshotChapterMtimes(
+  bookRoot: string,
+  chapters: ChapterIndexEntry[],
+): Promise<Map<string, number>> {
+  const root = path.resolve(bookRoot);
+  const snapshot = new Map<string, number>();
+  await Promise.all(
+    chapters.map(async (ch) => {
+      const s = await stat(path.join(root, 'chapters', ch.file)).catch(() => null);
+      snapshot.set(ch.file, s?.mtimeMs ?? 0);
+    }),
+  );
+  return snapshot;
+}
+
+export interface ApplyGateResultOptions {
+  /**
+   * 跑 gate 之前取的 mtime 快照（见 snapshotChapterMtimes）。
+   * 给定时一律用快照值回填；不给才退回「用后 stat」——那正是假绿窗口本身，
+   * 只应在明确知道没有并发写者的场景（如单测）省略。
+   */
+  mtimeSnapshot?: Map<string, number>;
+}
+
+/**
  * 把 runGates 结果回填进 state（编排层专用；core 六函数不回写状态）。
  * runGates 是全量扫描：未命中 findings 的章 = 本次检查通过，必须置 clean（防上一轮严重度残留）。
- * 命中章与 clean 章共享同一批 checkedAt；checkedMtimeMs 取当前文件 mtime（内容指纹）。
+ * 命中章与 clean 章共享同一批 checkedAt；checkedMtimeMs 取**跑前快照**里的 mtime。
  * 返回本批 checkedAt。
  *
  * ★回填前先对账（F12 落点 2）：检查器扫到的章数必须等于 state 的章数，否则**拒绝回填**。
@@ -160,7 +194,11 @@ export async function writeState(state: StoryState): Promise<void> {
  * （findings 为空 + exit 0），而下面的循环对「没命中 findings 的章」一律置 clean——
  * 少了这道对账，一次「零章」的检查就会把全书刷成绿色，比不检查更危险。
  */
-export async function applyGateResult(state: StoryState, result: GateResult): Promise<string> {
+export async function applyGateResult(
+  state: StoryState,
+  result: GateResult,
+  opts: ApplyGateResultOptions = {},
+): Promise<string> {
   const root = path.resolve(state.bookRoot);
   if (result.chapter_count !== state.chapters.length) {
     throw new GateFailureError(
@@ -174,7 +212,9 @@ export async function applyGateResult(state: StoryState, result: GateResult): Pr
   const summary = summarizeGateResult(result);
   const checkedAt = new Date().toISOString();
   for (const ch of state.chapters) {
-    const mtimeMs = (await stat(path.join(root, 'chapters', ch.file)).catch(() => null))?.mtimeMs ?? 0;
+    // 优先用跑前快照；没有快照才退回用后 stat（后者会重新引入假绿窗口，见 ApplyGateResultOptions）
+    const fromSnapshot = opts.mtimeSnapshot?.get(ch.file);
+    const mtimeMs = fromSnapshot ?? (await stat(path.join(root, 'chapters', ch.file)).catch(() => null))?.mtimeMs ?? 0;
     const hit = summary.get(ch.file);
     ch.gateStatus = hit !== undefined
       ? { ...hit, checkedAt, checkedMtimeMs: mtimeMs }
