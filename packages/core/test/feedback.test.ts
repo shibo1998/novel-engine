@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadFeedback, recordFeedback, readState, summarizeGateResult } from '../src/index.js';
+import { loadFeedback, recordFeedback, readState, saveChapterText, summarizeGateResult, writeState } from '../src/index.js';
 import type { GateResult } from '../src/types.js';
 
 /** 造一本最小可用的书：.soloent/book.json + chapters/ch-01.md */
@@ -74,6 +74,42 @@ test('recordFeedback：revisedText 为空则抛错，且不留下任何记录', 
     );
     const raw = await readFile(path.join(root, '.soloent', 'feedback.jsonl'), 'utf-8').catch(() => null);
     assert.equal(raw, null, '抛错发生在落盘之前，jsonl 不应被创建');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('recordFeedback：正文先保存时可用 originalText 保留改前版本', async () => {
+  const root = await makeBook();
+  try {
+    const originalText = await readFile(path.join(root, 'chapters', 'ch-01.md'), 'utf-8');
+    const revisedText = '# 第一章 测试\n\n保存后的正文。\n';
+    await saveChapterText({ bookRoot: root, chapterNo: 1, text: revisedText });
+    await recordFeedback({ bookRoot: root, chapterNo: 1, originalText, revisedText });
+
+    const [entry] = await loadFeedback(root);
+    assert.equal(entry?.original, originalText);
+    assert.equal(entry?.revised, revisedText);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('saveChapterText：保存后同步刷新章节索引并清空旧门禁状态', async () => {
+  const root = await makeBook();
+  try {
+    const state = await readState({ bookRoot: root, force: true });
+    state.chapters[0]!.gateStatus = {
+      worst: 'clean', count: 0, checkedAt: '2026-01-01T00:00:00.000Z', checkedMtimeMs: 1,
+    };
+    await writeState(state);
+
+    await saveChapterText({ bookRoot: root, chapterNo: 1, text: '# 第二章 新标题\n\n更新后的正文。\n' });
+
+    const refreshed = await readState({ bookRoot: root });
+    assert.equal(refreshed.chapters[0]?.title, '新标题');
+    assert.equal(refreshed.chapters[0]?.wordCount, 14);
+    assert.equal(refreshed.chapters[0]?.gateStatus, null);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

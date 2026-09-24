@@ -7,6 +7,9 @@ import { registerInit } from './commands/init.js';
 import { registerGates } from './commands/gates.js';
 import { registerState } from './commands/state.js';
 import { registerFeedback } from './commands/feedback.js';
+import { registerPreflight } from './commands/preflight.js';
+import { registerSummarize } from './commands/summarize.js';
+import { registerRules } from './commands/rules.js';
 
 program.name('novel').description('novel-engine 命令行外壳').version('0.0.0');
 
@@ -17,6 +20,9 @@ registerInit(program);
 registerGates(program);
 registerState(program);
 registerFeedback(program);
+registerPreflight(program);
+registerSummarize(program);
+registerRules(program);
 
 try {
   await program.parseAsync(process.argv);

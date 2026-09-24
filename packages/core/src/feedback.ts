@@ -6,6 +6,8 @@ import type { FeedbackEntry, GateFinding } from './types.js';
 export interface FeedbackInput {
   bookRoot: string;
   chapterNo: number;
+  /** 浏览器等先保存正文的场景可显式提供改前稿；不传时从磁盘读取当前稿。 */
+  originalText?: string;
   /** 人工改后的最终正文 */
   revisedText: string;
   /** 本次门禁在该章的 findings（可选）。有则在记录里带上类别与条数，用于 revise 分支反查 */
@@ -152,7 +154,7 @@ export async function recordFeedback(i: FeedbackInput): Promise<{ candidates: st
   if (entry === undefined) {
     throw new Error(`recordFeedback：第 ${i.chapterNo} 章不在索引中`);
   }
-  const original = await readFile(path.join(root, 'chapters', entry.file), 'utf-8');
+  const original = i.originalText ?? await readFile(path.join(root, 'chapters', entry.file), 'utf-8');
   const hunks = diffLines(original, i.revisedText);
   const date = new Date().toISOString().slice(0, 10);
 

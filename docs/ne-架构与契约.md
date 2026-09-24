@@ -12,11 +12,20 @@
 | `runGates` | `(o: RunGatesOptions) => Promise<GateResult>` | 子进程 |
 | `readState` | `(o: ReadStateOptions) => Promise<StoryState>` | 只读（不写盘） |
 | `writeState` | `(state: StoryState) => Promise<void>` | 原子写 |
+| `saveChapterText` | `(o: {bookRoot, chapterNo, text}) => Promise<{file,text}>` | 原子保存正文，强制重建并落盘章节索引；旧门禁状态失效 |
 | `recordFeedback` | `(i: FeedbackInput) => Promise<{candidates: string[]}>` | 追加 `.soloent/feedback.jsonl` + 写 `_candidates/` |
 
 编排层扩展：`writeChapter` / `convergeChapter` / `applyGateResult` / `loadRules` /
 `readSummaries` / `assembleLongContext` / `updateChapterSummary` / `isRetryable` /
-`loadFeedback` / `auditRules` / `checkHookAnchor` / `parseHookSpecs` / `auditHooks`。
+`loadFeedback` / `auditRules` / `checkChapterReadiness` / `checkHookAnchor` /
+`parseHookSpecs` / `auditHooks`。
+
+### 1.1 写前准备与正文编辑
+
+- `checkChapterReadiness(bookRoot, chapterNo)` 检查 `.soloent/canon.md` 与
+  `outline/ch-NN.md`，只返回提醒，不阻断起稿；存在的章纲会注入 `buildPrompt` 的 draft/revise 提示词。
+- `saveChapterText` 保存后立即强制重建 `state/story.json`，因此标题、字数会同步更新，已有 `gateStatus` 会清空，避免正文变更后继续显示假绿。
+- 章纲采用每章一个 Markdown 文件：`outline/ch-01.md`、`outline/ch-02.md`……缺失时仍允许自由起稿，避免把准备工作变成创作硬阻塞。
 
 ### 反馈落点（2026-09-23 裁定）
 
@@ -149,10 +158,25 @@ CLI `generate` 的退出码：`clean/no-findings/max-rounds` → 0；`llm-error/
 | 契约适配在 Python 侧 | 契约单点，加检查器不改核心 |
 | recordFeedback 写候选不写生效规则 | 防自我强化错误 |
 | web 只调 server，不 import core | 防 CLI/Web 双轨漂移 |
+| 保存正文后强制重建 state | 章节标题、字数和门禁摘要都来自正文，不能依赖旧缓存 |
+| 章纲缺失只提示不拦截 | 章纲能提高可控性，但硬拦会让临时创作和已有旧书无法继续 |
 | `moduleResolution: NodeNext`（原 Bundler） | Bundler 不强制 `.js` 后缀，漏写靠人工 grep；NodeNext 由编译器强制，防双轨 |
 | `summarizeGateResult` 同章多条 finding 取**最大**严重度并累加 count | 原实现是 `Map.set` 覆盖，`worst` 会退化成最后一条 |
 
-## 9. 雷区（都真踩过）
+## 9. 外壳接口
+
+CLI 的新增入口是：
+
+- `novel preflight --book <dir> --chapter <n>`：检查正典与本章章纲，输出 JSON 提醒。
+- `novel summarize --book <dir> --chapter <n>`：调用 LLM 更新 `state/summaries.json`；失败返回非 0。
+- `novel rules audit --book <dir>`：列出规则文件未声明或声明后缺失的项，只读不修改。
+
+Server 通过 `:4319` 提供对应能力：`PUT /chapter` 保存正文，`POST /preflight`、
+`/summarize`、`/feedback`、`/rules/audit` 分别对应准备检查、摘要、改稿反馈和规则审计；
+`POST /generate` 返回收敛结果、最终门禁发现、状态和准备提醒。Web 只通过这些 HTTP 接口工作，
+正文编辑有未保存保护，保存后可显式记录改稿反馈。
+
+## 10. 雷区（都真踩过）
 
 | 雷 | 挡法 |
 |---|---|

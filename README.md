@@ -54,14 +54,19 @@ cd apps/web && node node_modules/vite/bin/vite.js   # :5319
 | `write --book <书根> --chapter <n>` | 起草一章（draft 流水线） |
 | `generate --book <书根> --chapter <n>` | 收敛循环：缺章先起草，gate→revise 至 clean |
 | `prompt --book <书根> --chapter <n> [--mode revise] [--dump]` | 预览 PromptBundle |
+| `preflight --book <书根> --chapter <n>` | 检查正典与 `outline/ch-NN.md`；只提示，不阻断起稿 |
 | `gates --book <书根> [--write]` | 跑检查器；默认只读预览，--write 回填 gateStatus |
 | `state --book <书根> [--rebuild] [--set <json>]` | 读/写/重建章节索引 |
+| `summarize --book <书根> --chapter <n>` | 生成或刷新长篇上下文摘要 |
+| `rules audit --book <书根>` | 检查规则文件遗漏声明或声明路径缺失 |
 | `feedback add --book <书根> --chapter <n> --file <改后稿>` | 落 `.soloent/feedback.jsonl` + diff 聚合规则候选到 `_candidates/` |
 | `novel --help` | 完整参数 |
 
 ## server 端点（:4319，可用 NOVEL_SERVER_PORT 改）
 
-`GET /state?bookRoot=` ｜ `GET /chapter?bookRoot=&file=` ｜ `POST /prompt` ｜ `POST /write` ｜ `POST /gates`（body 带 `write:true` 回填）
+`GET /state?bookRoot=` ｜ `GET /chapter?bookRoot=&file=` ｜ `PUT /chapter`（保存正文） ｜ `POST /prompt` ｜ `POST /preflight` ｜ `POST /write` ｜ `POST /generate`（收敛并返回门禁明细） ｜ `POST /gates`（回填并返回 findings） ｜ `POST /summarize` ｜ `POST /feedback` ｜ `POST /rules/audit`
+
+新书的可选章纲路径为 `outline/ch-NN.md`（如 `outline/ch-01.md`）。存在时自动注入起稿提示词；缺失或正典仍含「待填」时会提示，但不会阻断自由起稿。
 
 ## 关键边界（不可违反）
 

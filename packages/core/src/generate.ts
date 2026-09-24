@@ -53,6 +53,21 @@ export async function writeChapter(o: WriteChapterOptions): Promise<WriteChapter
   return { file, ok: true };
 }
 
+export async function saveChapterText(o: {
+  bookRoot: string;
+  chapterNo: number;
+  text: string;
+}): Promise<{ file: string; text: string }> {
+  const root = path.resolve(o.bookRoot);
+  const state = await readState({ bookRoot: root });
+  const entry = state.chapters.find((chapter) => chapter.chapterNo === o.chapterNo);
+  if (entry === undefined) throw new Error(`saveChapterText：第 ${o.chapterNo} 章不存在`);
+  await atomicWriteText(path.join(root, 'chapters', entry.file), o.text);
+  const refreshedState = await readState({ bookRoot: root, force: true });
+  await writeState(refreshedState);
+  return { file: entry.file, text: o.text };
+}
+
 export interface ConvergeOptions {
   bookRoot: string;
   chapterNo: number;

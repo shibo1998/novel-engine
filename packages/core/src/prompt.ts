@@ -2,6 +2,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { readState } from './state.js';
 import { assembleLongContext, CONTEXT_CHAR_CAP } from './summaries.js';
+import { checkChapterReadiness } from './readiness.js';
 import type { BuildPromptOptions, GateFinding, PromptBundle, RuleRefs } from './types.js';
 
 /** 声明了但磁盘上不存在的规则文件——显式报错，绝不静默跳过（「没生效」和「没写」不能长得一样） */
@@ -178,6 +179,7 @@ export async function buildPrompt(o: BuildPromptOptions): Promise<PromptBundle> 
   const cfg = JSON.parse(stripBom(await readFile(path.join(dir, 'book.json'), 'utf-8'))) as Record<string, unknown>;
   const meta = extractBookMeta(cfg);
   const canon = await readFile(path.join(dir, 'canon.md'), 'utf-8').catch(() => '');
+  const readiness = await checkChapterReadiness(root, o.chapterNo);
   // rules 加载：book.json 显式声明（rules.author / rules.plugin），缺键视为空声明
   const rulesDecl = (cfg['rules'] ?? {}) as { author?: string[]; plugin?: string[] };
   const { text: rules, refs: ruleRefs } = await loadRules(root, rulesDecl);
@@ -203,6 +205,14 @@ export async function buildPrompt(o: BuildPromptOptions): Promise<PromptBundle> 
       : [...joined].slice(0, CONTEXT_CHAR_CAP).join('') + '\n（……超出上下文上限，已截断）';
   })();
 
+  const outlineSection = [
+    `# 本章细纲（${readiness.outlineFile}）`,
+    readiness.outlineText ?? '（暂无细纲；如需严格按章纲写作，请先补充对应文件。）',
+    '',
+    '# 写前提醒（仅提示，不阻断写作）',
+    ...(readiness.warnings.length > 0 ? readiness.warnings.map((warning) => `- ${warning}`) : ['- 未发现缺项。']),
+  ];
+
   const system = [IDENTITY, canon, ...rules].filter((s) => s.trim() !== '').join('\n\n');
 
   let user: string;
@@ -214,6 +224,8 @@ export async function buildPrompt(o: BuildPromptOptions): Promise<PromptBundle> 
         ? `本章既定标题：${entry.title}`
         : '本章标题自拟',
       '目标篇幅：2300–4000 字（去空白码点计）',
+      '',
+      ...outlineSection,
       '',
       '# 上一章结尾（仅作衔接参考，禁止复述）',
       prevTail !== '' ? prevTail : '（无上一章：本章从全新场景开场）',
@@ -234,6 +246,8 @@ export async function buildPrompt(o: BuildPromptOptions): Promise<PromptBundle> 
     user = [
       `# 任务：修订第 ${o.chapterNo} 章（${entry.file}）`,
       '仅修复下方「待修问题」命中的位置，其余文句保持原样，不得顺手改写。',
+      '',
+      ...outlineSection,
       '',
       `# 待修问题（共 ${findings.length} 条；行号 0 表示整章级问题）`,
       findings.length > 0 ? findings.map(formatFinding).join('\n') : '（空）',

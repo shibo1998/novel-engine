@@ -7,10 +7,12 @@ export { runGates } from './gates.js';
 export type { RunGatesOptions } from './gates.js';
 export { readState, writeState, summarizeGateResult, applyGateResult } from './state.js';
 export type { ReadStateOptions } from './state.js';
-export { writeChapter, convergeChapter } from './generate.js';
+export { writeChapter, saveChapterText, convergeChapter } from './generate.js';
 export type { WriteChapterOptions, WriteChapterResult, ConvergeOptions, ConvergeResult, ConvergeRound } from './generate.js';
 export { readSummaries, assembleLongContext, updateChapterSummary, CONTEXT_CHAR_CAP } from './summaries.js';
 export type { ChapterSummary, SummaryStore, LongContext } from './summaries.js';
+export { checkChapterReadiness } from './readiness.js';
+export type { ChapterReadiness } from './readiness.js';
 export { recordFeedback, loadFeedback } from './feedback.js';
 export type { FeedbackInput } from './feedback.js';
 export {
