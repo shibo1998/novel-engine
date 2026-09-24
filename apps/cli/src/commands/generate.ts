@@ -15,12 +15,20 @@ export function registerGenerate(program: Command): void {
         ...(opts.maxRounds !== undefined ? { maxRounds: opts.maxRounds } : {}),
       });
       process.stdout.write(JSON.stringify(result) + '\n');
-      // 目标未达成且因执行错误而停（LLM 失败 / 起草失败）→ 非 0；clean/no-findings/max-rounds 为合法结果 → 0
+      // 目标未达成且因执行错误而停（LLM 失败 / 起草失败 / 门禁状态自相矛盾）→ 非 0；
+      // clean/max-rounds 为合法结果 → 0。
       if (result.stopped === 'llm-error' || result.stopped === 'draft-failed') {
         const err = result.draftError ?? result.rounds.find((r) => r.llmError !== undefined)?.llmError;
         const kind = err !== undefined && !err.ok ? err.kind : 'unknown';
         const detail = err !== undefined && !err.ok ? err.detail : '';
         process.stderr.write(`收敛中断 [${kind}] ${detail}\n`);
+        process.exitCode = 1;
+      }
+      if (result.stopped === 'gate-inconsistent') {
+        // 门禁状态与 findings 对不上是程序 bug，不是「没问题」——非 0 让它无法被忽略
+        process.stderr.write(
+          '⛔ 门禁状态自相矛盾：gateStatus 与 findings 的键对不上（回填/聚合有 bug），本轮已停下，未继续改写。\n',
+        );
         process.exitCode = 1;
       }
     });

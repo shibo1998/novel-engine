@@ -101,13 +101,14 @@
 ```
 缺章 → writeChapter 起草（失败即停 draft-failed）
 每轮（≤3）：runGates → applyGateResult 回填落盘
+  → ★自检：worst==="clean" 与 findings 为空必须同为真（不一致即 gate-inconsistent 停，
+    那是回填/聚合的键对不上，属程序 bug，不许当成「没问题」放过去）
   → worst==="clean" 停（★硬约束：不进 revise）
-  → findings 为空 停（★硬约束：不进 revise）
   → buildPrompt(revise) → callLLM → 失败记录并停（llm-error，不吞不装成功）
   → 原子覆盖 ch-NN.md
 ```
 
-CLI `generate` 的退出码：`clean/no-findings/max-rounds` → 0；`llm-error/draft-failed` → 1。
+CLI `generate` 的退出码：`clean/max-rounds` → 0；`llm-error/draft-failed/gate-inconsistent` → 1。
 
 ## 7. recordFeedback 安全边界
 

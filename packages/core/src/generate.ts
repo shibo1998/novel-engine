@@ -80,7 +80,7 @@ export interface ConvergeRound {
   round: number;
   findings: number;
   worst: string;
-  action: 'stop-clean' | 'stop-no-findings' | 'revise' | 'stop-llm-error';
+  action: 'stop-clean' | 'stop-inconsistent' | 'revise' | 'stop-llm-error';
   llmError?: LLMResult;
 }
 
@@ -90,7 +90,7 @@ export interface ConvergeResult {
   drafted: boolean;
   rounds: ConvergeRound[];
   finalWorst: string;
-  stopped: 'clean' | 'no-findings' | 'max-rounds' | 'llm-error' | 'draft-failed';
+  stopped: 'clean' | 'max-rounds' | 'llm-error' | 'draft-failed' | 'gate-inconsistent';
   draftError?: LLMResult;
   /**
    * 本次实际发出的 LLM 请求次数上限（F15）。
@@ -154,14 +154,23 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
     const worst = state.chapters.find((c) => c.chapterNo === o.chapterNo)?.gateStatus?.worst ?? 'clean';
     finalWorst = worst;
 
-    if (worst === 'clean') {
-      rounds.push({ round: i, findings: chapterFindings.length, worst, action: 'stop-clean' });
-      stopped = 'clean';
+    // ★自检而非两条 stop 分支（F18）。
+    // 旧版这里是「worst==='clean' 就停」+「findings 为 0 就停」两条并列分支，
+    // 而第二条**不可达**：worst 取自 applyGateResult 回填的 gateStatus，回填逻辑是
+    // 「不在 finding 摘要里 → clean」，所以 worst==='clean' 与 findings 为空是同一件事，
+    // 第二条永远走不到。一个走不到的分支比没有更糟——读代码的人会以为
+    // 「没发现 = 安全」是被显式保证的语义。
+    // 现在改成先断言两者自洽，不自洽就是回填/聚合的键对不上，属程序 bug，必须显式停下，
+    // 而不是猜一个语义把它当「没问题」放过去。
+    const isClean = worst === 'clean';
+    if (isClean !== (chapterFindings.length === 0)) {
+      rounds.push({ round: i, findings: chapterFindings.length, worst, action: 'stop-inconsistent' });
+      stopped = 'gate-inconsistent';
       break;
     }
-    if (chapterFindings.length === 0) {
-      rounds.push({ round: i, findings: 0, worst, action: 'stop-no-findings' });
-      stopped = 'no-findings';
+    if (isClean) {
+      rounds.push({ round: i, findings: 0, worst, action: 'stop-clean' });
+      stopped = 'clean';
       break;
     }
 
