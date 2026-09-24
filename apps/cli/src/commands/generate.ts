@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { convergeChapter } from '@novel/core';
+import { assertStyleReady, convergeChapter } from '@novel/core';
 
 export function registerGenerate(program: Command): void {
   program
@@ -9,6 +9,9 @@ export function registerGenerate(program: Command): void {
     .requiredOption('--chapter <n>', '章号', (v: string) => Number.parseInt(v, 10))
     .option('--max-rounds <n>', '收敛上限轮次', (v: string) => Number.parseInt(v, 10))
     .action(async (opts: { book: string; chapter: number; maxRounds?: number }) => {
+      // 风格/红线层未就绪 → 拒绝生成。放在最前面：一旦开始收敛就会烧 LLM 额度，
+      // 这道门必须在**花钱之前**，而不是等三轮改写跑完再报「其实没规则可依」。
+      await assertStyleReady(opts.book);
       const result = await convergeChapter({
         bookRoot: opts.book,
         chapterNo: opts.chapter,

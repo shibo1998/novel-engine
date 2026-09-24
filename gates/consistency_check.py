@@ -35,7 +35,7 @@ def _ep(*args, **kwargs):
 
 
 # ------------------------------------------------------------- AI 句式结构
-# 源：assets/rules/ai-anti-patterns.md 的「句式类（结构级）」（全局规则，与具体书无关，故内置）。
+# 源：content/rules/ai-anti-patterns.md 的「句式类（结构级）」（全局规则，与具体书无关，故内置）。
 # 为什么单列一档：book.json 的 blacklist 只覆盖**词级**（23 词），句式结构此前完全无机检，
 # 只能靠人/AI 自觉。2026-09-19 实测：ch-32 机检「严重 0 中等 0 轻微 0」，
 # 却含 7 处句式违规（否定排比／裁判腔／排比三联／抽象情绪／柔化副词／忽然／结尾三联）。
@@ -419,7 +419,7 @@ def check(book, chapters):
                     if w in line:
                         add("中等", fn, i, f"疑似章末升华/说教「{w}」", line[:70])
 
-            # 14b AI 句式结构（源：assets/rules/ai-anti-patterns.md）
+            # 14b AI 句式结构（源：content/rules/ai-anti-patterns.md）
             for sid, pat, desc in AI_STRUCT_PATTERNS:
                 if re.search(pat, line):
                     add("轻微", fn, i, f"[{sid}] {desc}", line[:60])
@@ -663,7 +663,7 @@ def print_checks(book):
                          "（存在性断言，不是文风下限；chapter.word_min 可调，设 0 关闭）"))
     rows.append(("轻微", "AI 句式结构  " + str(len(AI_STRUCT_PATTERNS)) + " 类（"
                          + "／".join(s for s, _, _ in AI_STRUCT_PATTERNS)
-                         + "）——源 assets/rules/ai-anti-patterns.md；有语境例外，须人工判定"))
+                         + "）——源 content/rules/ai-anti-patterns.md；有语境例外，须人工判定"))
     rows.append(("中等", "同段连发  「忽然/突然/猛地」一页 ≥2 次即违规"))
     rows.append(("中等", "比喻词堆砌  一章「仿佛/似乎/宛如/犹如」> 2 处"))
     NR = C.get("name_roster") or {}
@@ -676,17 +676,81 @@ def print_checks(book):
     if C.get("foreshadow_check"):
         rows.append(("轻微", "伏笔埋设  回收总表标了「埋设于第 N 章」而该章无线索词即提示"))
 
+    # --- 未启用 / 不会生效的机检项（2026-09-24 新增）---
+    # 为什么必须显式列出来：某项在 findings 里没出现，可能是「查了没问题」，
+    # 也可能是「根本没启用」——两者在输出上**同形**。作者看到「0 问题」，
+    # 无从分辨自己是被检查过了还是被跳过了。这与本项目反复在治的
+    # 「查不到 = 没问题」是同一个病，只是发生在配置层。
+    # 本节的输出只走 stderr、不产生 finding、不影响退出码：目的是让「没查」可见，
+    # 而不是把每个未配置项都变成一条要人处理的告警（那会淹没真问题）。
+    off = []
+    R = C.get("rhythm") or {}
+    _rhythm_thresholds = ("narr_avg_min", "narr_long_min_pct", "short_ge10_max_pct",
+                          "dialogue_max_pct", "turn_min_per_1000")
+    if not R:
+        off.append(("句长节奏", "checks.rhythm 未配置"))
+    elif not R.get("enabled", True):
+        off.append(("句长节奏", f"checks.rhythm.enabled = {R.get('enabled')!r}"))
+    elif not any(R.get(k) is not None for k in _rhythm_thresholds):
+        off.append(("句长节奏",
+                    "一个阈值都没填——判据形如 `读数 < R.get(key, 0)`，兜底 0 时永不成立，"
+                    "等于没开。用 --suggest-rhythm 生成一组再粘进来"))
+
+    P = C.get("panel") or {}
+    if not P:
+        off.append(("面板文体", "checks.panel 未配置"))
+    elif P.get("max_lines") is None and not P.get("forbid"):
+        off.append(("面板文体", "既无 max_lines 也无 forbid——本项不会产出任何发现"))
+
+    H = C.get("hook_check") or {}
+    if not H or not H.get("enabled", True):
+        off.append(("章末钩子", "checks.hook_check 未启用"))
+    else:
+        # ★本仓特有：_hook_check 靠 `import brief` 取细纲钩子，而 brief.py 在迁仓时没跟过来。
+        # 它的 except 会把 ImportError 一起吞掉并 return —— 于是「启用了」与「生效了」不同。
+        # 这种「配置看起来对、实际恒不生效」的项，正是最该被点名的。
+        try:
+            import brief  # noqa: F401
+        except Exception:
+            off.append(("章末钩子",
+                        "已启用但**恒不生效**：检查器依赖 brief 模块（brief.py），本仓不存在，"
+                        "ImportError 被 except 吞掉后直接 return"))
+
+    F = C.get("foreshadow_check") or {}
+    if not F or not F.get("enabled", True):
+        off.append(("伏笔埋设", "checks.foreshadow_check 未启用"))
+    else:
+        _fp = str((book.sec("paths") or {}).get("foreshadow") or "")
+        if not _fp:
+            off.append(("伏笔埋设", "已启用但恒不生效：book.json 的 paths.foreshadow 未声明"))
+        elif not os.path.isfile(os.path.join(book.root, _fp)):
+            off.append(("伏笔埋设", f"已启用但恒不生效：伏笔表文件不存在（{_fp}）"))
+
+    NR = C.get("name_roster") or {}
+    if not NR or not NR.get("enabled", True):
+        off.append(("登记完整性", "checks.name_roster 未启用"))
+    elif not _canon_names(book) and not (NR.get("registered") or []):
+        off.append(("登记完整性",
+                    "已启用但恒不生效：canon.md 人物表为空、登记册也为空（三方互校无输入）"))
+
     _ep("机检项清单（唯一来源：consistency_check.py 读 book.json 生成；文档请引用本命令输出，勿复述）")
     _ep("=" * 72)
     for i, (sev, desc) in enumerate(sorted(rows, key=lambda r: kit.SEV_ORDER.get(r[0], 9)), 1):
         _ep(f"{i:>2}. 【{sev}】{desc}")
     _ep()
+    if off:
+        _ep(f"⚠ 本次**未生效**的机检项 {len(off)} 项——下列各项不会产出任何发现，")
+        _ep("  不要把它们没报问题当成「查过且没问题」：")
+        for name, why in off:
+            _ep(f"  · {name}：{why}")
+        _ep()
     g = book.sec("gate")
     _ep(f"阈值：黑名单累计 > {g.get('blacklist_total', 60)} 触发警告；"
           f"单章黑名单词 > {g.get('blacklist_per_chapter', 6)} 触发警告。")
-    _ep("批量长跑：**自上次过闸后新增 ≥2 章未逐章校验即拦截**（判据写死在 preflight.py；"
-          "「一次新增 ≥5 章才警告」是早期说法，已于 2026-09-20 作废——"
-          "`gate.batch_warn` 这个键没有任何脚本读它，已从新书模板移除）。")
+    _ep("批量长跑：本仓**没有**实现「自上次过闸后新增 ≥2 章未逐章校验即拦截」这条判据——")
+    _ep("  旧 kit 里它写死在 preflight.py，而 preflight.py 未随迁（本仓无此文件）。")
+    _ep("  本仓对应的保护在 `novel book`：任一章未过闸即停并报断点，另有 --max-llm-calls 额度闸。")
+    _ep("  （`gate.batch_warn` 这个键在旧 kit 就没有任何脚本读它，2026-09-20 已从新书模板移除。）")
 
 
 # ------------------------------------------------------------------ 阈值校准
@@ -815,8 +879,9 @@ def suggest_rhythm(book, argv):
     _ep("  ⚠️ 注意这不是「四分之一」：四个指标**各自**罚最差四分位，而只要有**任何一项**越线就算被拦，"
           "并集自然大得多（4 项近似独立时约 68%）。想让总体只拦 ~25%，"
           "把下限调到 P10 附近、上限调到 P90 附近。")
-    _ep("→ 按现状取分位只会固化现状；要提标准，请用 `--from <样板书目录>` 按对标实测取，"
-          "或直接采用 `assets/book.example.json` 的目标档，并按卷往上收。")
+    _ep("→ 按现状取分位只会固化现状；要提标准，请用 `--from <样板书目录>` 按对标实测取。")
+    _ep("  （旧 kit 另有一份 `assets/book.example.json` 目标档；本仓没有这个文件，"
+        "不要照旧文档去找——校准的唯一入口就是本命令的 --from。）")
     _ep("→ 复跑：`--list-checks` 可核对该项是否已启用；填好后 doctor 不再提「启动档」。")
     return 0
 

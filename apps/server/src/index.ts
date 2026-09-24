@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   applyGateResult,
+  assertStyleReady,
   auditRules,
   buildPrompt,
   checkChapterReadiness,
@@ -318,6 +319,10 @@ const server = createServer(async (req, res) => {
       }
 
       if (url.pathname === '/write') {
+        // 风格/红线层未就绪 → 拒绝起草。面板是「一章一章点」的入口，
+        // 与 CLI 的 generate/book 同属「会产生新正文」的动作，必须同一道门。
+        // 少挡一处就等于留了一条绕过路径（本仓反复栽在「判据只在一处生效」上）。
+        await assertStyleReady(bookRoot);
         send(res, 200, await writeChapter({ bookRoot, chapterNo: requireChapterNo(body['chapterNo']) }));
         return;
       }
@@ -326,6 +331,7 @@ const server = createServer(async (req, res) => {
         const chapterNo = requireChapterNo(body['chapterNo']);
         const task = beginTask(bookRoot, `收敛第 ${chapterNo} 章`);
         try {
+          await assertStyleReady(bookRoot, { signal: task.signal });
           const readiness = await checkChapterReadiness(bookRoot, chapterNo);
           const generation = await convergeChapter({ bookRoot, chapterNo, signal: task.signal });
           // ★顺序不能换（F17）：读 state → 取**跑前** mtime 快照 → 跑 gate → 回填

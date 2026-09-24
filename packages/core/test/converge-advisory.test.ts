@@ -1,22 +1,38 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { convergeChapter, isPassingWorst, resetLlmBreaker } from '../src/index.js';
 
-/** 这一组要真跑检查器（Python），缺 Python 的机器上跳过而不是假绿。 */
-function pythonAvailable(): boolean {
-  try {
-    const py = process.env['NOVEL_PYTHON'] ?? (process.platform === 'win32' ? 'python' : 'python3');
-    return spawnSync(py, ['-c', 'pass'], { timeout: 10_000 }).status === 0;
-  } catch {
-    return false;
-  }
+/**
+ * 这一组要真跑检查器（Python），缺 Python 的机器上跳过而不是假绿。
+ *
+ * ⚠️ 必须用**异步** spawn，不能用 spawnSync（2026-09-24 实测）：
+ * 本机沙箱对同步子进程一律返回 `EBUSY`，连 `python -c pass` 都起不来，
+ * 而异步 spawn 完全正常（runGates 走的正是异步那条）。
+ * 用 spawnSync 探测的后果是——**在 Python 明明可用的机器上把所有依赖 Python 的
+ * 用例静默跳过**，回归网看着绿，实际一条没跑。跳过本身是设计意图，
+ * 但「探测失败」与「环境没有」被混成了同一个结果，就是本仓最忌的那种同形。
+ */
+async function pythonAvailable(): Promise<boolean> {
+  const py = process.env['NOVEL_PYTHON'] ?? (process.platform === 'win32' ? 'python' : 'python3');
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const done = (v: boolean): void => { if (!settled) { settled = true; resolve(v); } };
+    try {
+      const c = spawn(py, ['-c', 'pass'], { windowsHide: true });
+      const timer = setTimeout(() => { c.kill('SIGKILL'); done(false); }, 10_000);
+      c.on('error', () => { clearTimeout(timer); done(false); });
+      c.on('close', (code) => { clearTimeout(timer); done(code === 0); });
+    } catch {
+      done(false);
+    }
+  });
 }
-const HAS_PYTHON = pythonAvailable();
+const HAS_PYTHON = await pythonAvailable();
 const skip = HAS_PYTHON ? false : '未找到可用 Python（gates 检查器跑不起来）';
 
 // 含 7 处 AI 句式（裁判腔/柔化副词/时间切片/否定排比/空气拟态）

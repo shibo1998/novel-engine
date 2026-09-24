@@ -32,8 +32,14 @@ def _ep(*args, **kwargs):
 KIT_ROOT = os.path.dirname(os.path.abspath(__file__))      # 本目录 = scripts/
 PLUGIN_ROOT = os.path.dirname(KIT_ROOT)                    # 插件根
 # 支撑目录沿用 SoloEnt 官方约定：templates / docs / scripts（+ assets 放打包进来的库）
-ASSETS = os.path.join(PLUGIN_ROOT, "assets")               # 打包的规则库/技能库/工作流/配置模板
-TEMPLATES = os.path.join(PLUGIN_ROOT, "templates")         # 新书骨架模板
+#
+# ⚠️ 迁仓后目录层级变了：本仓把「随插件分发的内容」整体收进 content/，
+# 于是 templates/ 与 assets/ 都比旧插件深一层。曾经写成 PLUGIN_ROOT/templates
+# ——那个路径**不存在**，而 style_doc_issues 的模板比对有 isfile 守卫，
+# 于是「与插件模板一字不差」这条判据静默失效（死分支，不报错也不生效）。
+# 改路径时务必跑 `python -c "import kit;print(kit.TEMPLATES)"` 确认目录真实存在。
+ASSETS = os.path.join(PLUGIN_ROOT, "content")              # 随插件分发的内容根（规则/技能/模板）
+TEMPLATES = os.path.join(PLUGIN_ROOT, "content", "templates")  # 新书骨架模板
 DOCS = os.path.join(PLUGIN_ROOT, "docs")                   # 分阶段手册（按需加载）
 # 兼容旧名：早期版本把分阶段手册放在 references/，保留这个别名以防有引用残留
 REFERENCES = DOCS
@@ -472,12 +478,13 @@ def load_book(argv=None, required=True):
         if required:
             _ep("⛔ 找不到书配置：从当前目录逐级向上都没有 .soloent/book.json")
             _ep("   请把 CWD 切到书目录，或显式指定：--root \"D:/1-work/novel/某本书\"")
-            # 这两条路径以前写死成 `_agent/book.example.json`——那个目录早就不存在了，
-            # 配置模板现在在 assets/ 下。用户照提示去找只会扑空（2026-09-20 修）。
-            _ep(f"   新书初始化：python \"{os.path.join(KIT_ROOT, 'init_book.py')}\" "
-                  f"--dir <书目录> --title <书名> --genre <题材> --platform <平台> --tags urban")
-            _ep(f"   或手工复制模板：{os.path.join(ASSETS, 'book.example.json')} "
-                  f"→ <书目录>/.soloent/book.json")
+            # 这两条路径以前写死成 `_agent/book.example.json`——那个目录早就不存在了。
+            # 2026-09-24 再修一次：`init_book.py` 与 `assets/book.example.json` 在本仓
+            # **都不存在**（新书初始化已改由 CLI 的 `novel init` 承担，配置由代码生成而非模板复制）。
+            # 提示里指向不存在的文件，用户照做必然失败，且失败原因（路径错）与真实原因不符。
+            _ep("   新书初始化：novel init --dir <书目录> --title <书名> "
+                  "[--genre <题材>] [--platform <平台>]")
+            _ep("   （该命令会一并生成 .soloent/book.json 与三份待填的风格/红线文件）")
             sys.exit(2)
         return None
     p = os.path.join(root, CONFIG_REL)
@@ -594,14 +601,20 @@ STYLE_DOCS = [
 ]
 
 # 模板/骨架里表示「待你填写」的标记，出现即视为没填
-PLACEHOLDER_MARKS = ("✏️", "此处待填", "待填：", "待填)", "（未填", "(未填")
+# ⚠️ 全角右括号那条（"待填）"）是 2026-09-24 补的：原先只收了半角的 "待填)"，
+# 而 `novel init` 写进 canon.md / now.md 的恰恰是**全角**「（待填）」——
+# 于是最常见的那一种占位符反而不在词表里。词表少一条的后果不是报错，
+# 是闸门对最常见的占位写法视而不见，正是「守卫在但不生效」的经典形态。
+PLACEHOLDER_MARKS = ("✏️", "此处待填", "待填：", "待填)", "待填）", "（未填", "(未填")
 
 
 def style_doc_issues(root, cfg=None):
     """风格/红线层「填了没」。返回 [(级别, 相对路径, 说明)]，级别 ∈ {"block", "warn"}。
 
-    block = 有占位符没填（写正文前必须先解决）；warn = 文件缺失/为空，或与模板一字不差
-    （说明从没动过）。两者都不静默——这是本次事故的根因。
+    **级别是「原因类别」，不是「是否拦截」**——是否拦截见 style_gate_ready()。
+      block = 有占位符没填 / 文件缺失或为空
+      warn  = 与插件模板一字不差（说明从没动过；理论上可能是作者有意采用通用模板）
+    两者都不静默——这是本次事故的根因。
     """
     out = []
     paths = (cfg or {}).get("paths") or {}
@@ -616,7 +629,7 @@ def style_doc_issues(root, cfg=None):
             except OSError:
                 text = ""
         if not text.strip():
-            out.append(("warn", rel, f"{label}缺失或为空"))
+            out.append(("block", rel, f"{label}缺失或为空"))
             continue
         hit = next((m for m in PLACEHOLDER_MARKS if m in text), None)
         if hit:
@@ -634,8 +647,17 @@ def style_doc_issues(root, cfg=None):
 
 
 def style_gate_ready(root, cfg=None):
-    """写正文前的硬判据：风格层不得还有占位符。返回 (就绪?, [未就绪说明])。"""
-    bad = [f"{rel}：{why}" for lvl, rel, why in style_doc_issues(root, cfg) if lvl == "block"]
+    """写正文前的硬判据：风格/红线层必须「存在且填过」。返回 (就绪?, [未就绪说明])。
+
+    ★判据是「一条 issue 都没有」，**不是**「没有 block」。
+
+    为什么必须这样收口（2026-09-24 修）：原先只把 block 计入未就绪，于是
+    「把文件删掉」就成了一条绕过闸门的路径——对下游而言「有占位符」与「文件缺失」
+    完全等价（都是零文风依据），却只有前者拦人。这正是本项目反复在堵的那类假绿：
+    **判据形状不同，就会被挑软的那条走**。级别仍保留，只为在报告里说清原因类别。
+    """
+    issues = style_doc_issues(root, cfg)
+    bad = [f"{rel}：{why}" for _lvl, rel, why in issues]
     return (not bad), bad
 
 

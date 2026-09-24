@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { Command } from 'commander';
-import { checkChapterReadiness, convergeChapter, readState, updateChapterSummary, isPassingWorst } from '@novel/core';
+import { assertStyleReady, checkChapterReadiness, convergeChapter, readState, updateChapterSummary, isPassingWorst } from '@novel/core';
 
 interface ChapterRun {
   chapterNo: number;
@@ -42,6 +42,10 @@ export function registerBook(program: Command): void {
       summarize: boolean;
     }) => {
       const root = path.resolve(opts.book);
+      // 风格/红线层未就绪 → 拒绝开跑。批量的代价最大（一次可能连写几十章），
+      // 必须挡在**第一次 LLM 请求之前**，而不是写到第 N 章才发现全书没有文风依据
+      // （这正是本项目出过的事故形态：19 章连发、从第 15 章起设定全线漂移）。
+      await assertStyleReady(root);
       const state = await readState({ bookRoot: root }); // 顺带校验 bookRoot 是目录
       const existingMax = state.chapters.reduce((m, c) => Math.max(m, c.chapterNo), 0);
       const from = opts.from ?? existingMax + 1;
