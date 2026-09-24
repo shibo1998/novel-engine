@@ -130,9 +130,15 @@ function collect(
   });
 }
 
-function firstLine(text: string): string {
-  const [line = ''] = text.split('\n', 1);
-  return line.trim();
+/**
+ * 取 stderr 的前几行非空内容。
+ * 为什么不能只用首行：检查器的**配置校验错误是把缺项逐行列出来的**
+ * （book.title 缺失 / paths 段缺失 / chapter.file_regex 缺失 …），
+ * 只回显首行恰好把「哪个键写错了」截掉——那正是读日志的人唯一想要的信息。
+ */
+function headLines(text: string, limit = 6): string {
+  const lines = text.split('\n').map((l) => l.trim()).filter((l) => l !== '');
+  return lines.slice(0, limit).join('\n    ');
 }
 
 function shapeError(field: string, raw: string): Error {
@@ -221,7 +227,7 @@ export async function runGates(opts: RunGatesOptions): Promise<GateResult> {
       collected.kind,
       `${head}：${gate} @ ${opts.bookRoot}\n` +
         `  详情：${collected.detail}\n` +
-        `  stderr 首行：${firstLine(collected.stderr) || '(无)'}\n` +
+        `  stderr：\n    ${headLines(collected.stderr) || '(无)'}\n` +
         `  提示：书越长全量扫描越慢——可用 NOVEL_GATE_TIMEOUT_MS 调大超时，或先用 --since 做增量检查。`,
     );
   }
@@ -229,7 +235,10 @@ export async function runGates(opts: RunGatesOptions): Promise<GateResult> {
   const { code, stdout, stderr } = collected;
   // 语义钉注：检查器「发现问题也返回 0」，非 0（exit 2）才是执行失败
   if (code !== 0) {
-    throw new GateFailureError('exit', `gate 执行失败（exit ${code ?? 'signal'}）：${firstLine(stderr)}`);
+    throw new GateFailureError(
+      'exit',
+      `gate 执行失败（exit ${code ?? 'signal'}）：\n    ${headLines(stderr) || '(stderr 无内容)'}`,
+    );
   }
 
   let parsed: unknown;
