@@ -272,6 +272,9 @@ def check(book, chapters):
     rare = C.get("rare_chars") or {}
     quote = C.get("quote_style") or {}
     word_max = book.get("chapter", "word_max", 3000)
+    # 字数下界（F19）。默认给一个**故意很低**的值：它不是文风下限，
+    # 而是「这个文件还不是一章」的存在性断言——正常章 2300+ 字，50 字以下只可能是空壳。
+    word_min = book.get("chapter", "word_min", 50)
     title_re = book.get("chapter", "title_regex")
     title_hint = book.get("chapter", "title_hint", "# 第0XX章 标题")
     exempt = {(f, int(l)) for f, l, *_ in (C.get("scale_exempt") or [])}
@@ -292,6 +295,14 @@ def check(book, chapters):
         # --- 标题格式 ---
         if title_re and lines and not re.match(title_re, lines[0]):
             add("中等", fn, 1, f"章标题格式应为「{title_hint}」", lines[0][:80])
+        # 兜底：未配置 chapter.title_regex 时，至少要求「首个非空行是 H1」。
+        # 缺标题的章在 state 里 title 会是空串——那是结构上就不像一章的文件。
+        # 配了 title_regex 就不重复报（上面那条更精确）。
+        if not title_re:
+            first_nonempty = next((l for l in lines if l.strip() != ""), "")
+            if not first_nonempty.lstrip().startswith("#"):
+                add("中等", fn, 0, "缺 H1 标题（首个非空行不是 # …）——未配置 chapter.title_regex 时的兜底",
+                    first_nonempty[:80])
 
         for i, line in enumerate(lines, 1):
             # 1 唯一写法
@@ -432,6 +443,16 @@ def check(book, chapters):
         n = kit.hanzi_count(text)
         if word_max and n > word_max:
             add("中等", fn, 0, f"超长章：{n} 汉字 > 上限 {word_max}", "")
+
+        # 16a 空章 / 占位章（F19）
+        # 为什么必须补这一条：本脚本原有的内容层断言**全是「不该有什么」**——
+        # 唯一写法、黑名单、人物越界、生僻字、标点、超长…… 一个**零内容**的章
+        # 天然一条都不命中，于是干干净净地全绿。「查不到问题」再次被当成「没问题」，
+        # 与协议层那个谬误同源，只是下沉了一层；补的就是第一条「应该有什么」。
+        if word_min and n < word_min:
+            add("严重", fn, 0,
+                f"疑似空章/占位章：{n} 汉字 < 下限 {word_min}"
+                "（存在性断言：这么短的文件不构成一章，不是文风下限）", "")
 
         # 16b 比喻词堆砌（章级：一章比喻 ≤2 个，源 ai-anti-patterns.md）
         # 只算明确比喻词，**不含「像」**——「像」有推测/举例等正常用法，纳入会大量误报。
@@ -628,8 +649,18 @@ def print_checks(book):
                              f"≤10字短句 ≤{R.get('short_ge10_max_pct')}%、"
                              f"转折词 ≥{R.get('turn_min_per_1000')}/千字"))
         rows.append(("中等", f"篇幅配比  对话占比 ≤{R.get('dialogue_max_pct')}%"))
-    rows.append(("中等", f"章标题格式  须匹配 /{book.get('chapter', 'title_regex')}/"))
-    rows.append(("中等", f"超长章  汉字数 > {book.get('chapter', 'word_max')}"))
+    # 口径必须与 check() 一致：check() 对这两个键各有默认值/兜底，
+    # 而这里原先直接取原始配置，未配置时会把「None」当成检查项印出来——
+    # 清单是「机检项唯一来源」，来源说 None 就等于说瞎话。
+    _wmax = book.get("chapter", "word_max", 3000)
+    _wmin = book.get("chapter", "word_min", 50)
+    _tre = book.get("chapter", "title_regex")
+    rows.append(("中等", f"章标题格式  须匹配 /{_tre}/" if _tre
+                         else "章标题格式  未配置 chapter.title_regex；兜底要求首个非空行为 H1"))
+    if _wmax:
+        rows.append(("中等", f"超长章  汉字数 > {_wmax}"))
+    rows.append(("严重", f"空章/占位章  汉字数 < {_wmin}"
+                         "（存在性断言，不是文风下限；chapter.word_min 可调，设 0 关闭）"))
     rows.append(("轻微", "AI 句式结构  " + str(len(AI_STRUCT_PATTERNS)) + " 类（"
                          + "／".join(s for s, _, _ in AI_STRUCT_PATTERNS)
                          + "）——源 assets/rules/ai-anti-patterns.md；有语境例外，须人工判定"))
