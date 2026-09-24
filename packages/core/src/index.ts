@@ -11,8 +11,8 @@ export { writeChapter, saveChapterText, convergeChapter } from './generate.js';
 export type { WriteChapterOptions, WriteChapterResult, ConvergeOptions, ConvergeResult, ConvergeRound } from './generate.js';
 export { readSummaries, assembleLongContext, updateChapterSummary, CONTEXT_CHAR_CAP } from './summaries.js';
 export type { ChapterSummary, SummaryStore, LongContext } from './summaries.js';
-export { checkChapterReadiness } from './readiness.js';
-export type { ChapterReadiness } from './readiness.js';
+export { checkChapterReadiness, extractChapterSection, enclosingStageHeading, OUTLINE_CHAR_CAP } from './readiness.js';
+export type { ChapterReadiness, OutlineScope } from './readiness.js';
 export { recordFeedback, loadFeedback } from './feedback.js';
 export type { FeedbackInput } from './feedback.js';
 export {

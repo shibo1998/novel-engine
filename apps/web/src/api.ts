@@ -57,6 +57,10 @@ export interface CancelResult {
 export interface ChapterReadiness {
   chapterNo: number;
   outlineFile: string;
+  /** chapter=按章细纲文件；volume=从 book.json 的 paths.outline 声明的卷纲里取用 */
+  outlineScope: 'chapter' | 'volume';
+  /** true 表示卷纲里没定位到本章段，界面提示的是卷级背景而非本章细纲 */
+  outlineChapterSectionMissing: boolean;
   warnings: string[];
 }
 

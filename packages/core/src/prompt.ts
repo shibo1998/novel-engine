@@ -205,9 +205,19 @@ export async function buildPrompt(o: BuildPromptOptions): Promise<PromptBundle> 
       : [...joined].slice(0, CONTEXT_CHAR_CAP).join('') + '\n（……超出上下文上限，已截断）';
   })();
 
+  // 细纲来源可能是「按章文件」，也可能是「从卷纲里抠出的本章段」——标题必须如实说明是哪一种。
+  // 不说清的话，模型（和人）会把卷级背景当成本章细纲，照着错的章去写且看不出错。
+  const outlineHeading = readiness.outlineText === null
+    ? '# 本章细纲（未找到可用细纲）'
+    : readiness.outlineScope === 'chapter'
+      ? `# 本章细纲（来源：${readiness.outlineFile}）`
+      : readiness.outlineChapterSectionMissing
+        ? `# 卷级背景（来源：${readiness.outlineFile}；未能定位到第 ${o.chapterNo} 章段落）`
+        : `# 本章细纲（来源：${readiness.outlineFile} 的第 ${o.chapterNo} 章段）`;
   const outlineSection = [
-    `# 本章细纲（${readiness.outlineFile}）`,
-    readiness.outlineText ?? '（暂无细纲；如需严格按章纲写作，请先补充对应文件。）',
+    outlineHeading,
+    readiness.outlineText
+      ?? '（暂无细纲；如需严格按章纲写作，请补充对应文件，或在该书 book.json 的 paths.outline 指定卷纲。）',
     '',
     '# 写前提醒（仅提示，不阻断写作）',
     ...(readiness.warnings.length > 0 ? readiness.warnings.map((warning) => `- ${warning}`) : ['- 未发现缺项。']),

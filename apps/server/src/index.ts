@@ -197,7 +197,15 @@ function requireText(v: unknown, field: string): string {
 }
 
 function publicReadiness(report: ChapterReadiness): Omit<ChapterReadiness, 'outlineText'> {
-  return { chapterNo: report.chapterNo, outlineFile: report.outlineFile, warnings: report.warnings };
+  // outlineText 不外传（整卷细纲文本，面板用不上、还白传一遍）；
+  // 但决定「这是本章细纲还是卷级背景」的两个字段必须传，否则面板无法如实呈现。
+  return {
+    chapterNo: report.chapterNo,
+    outlineFile: report.outlineFile,
+    outlineScope: report.outlineScope,
+    outlineChapterSectionMissing: report.outlineChapterSectionMissing,
+    warnings: report.warnings,
+  };
 }
 
 const server = createServer(async (req, res) => {
