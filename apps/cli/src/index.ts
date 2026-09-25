@@ -23,6 +23,7 @@ import { registerOps } from './commands/ops.js';
 import { registerCheckpoint } from './commands/checkpoint.js';
 import { registerWrapup } from './commands/wrapup.js';
 import { registerImpact } from './commands/impact.js';
+import { registerStyleAnchor } from './commands/style-anchor.js';
 
 program.name('novel').description('novel-engine 命令行外壳').version('0.0.0');
 
@@ -49,6 +50,7 @@ registerOps(program);
 registerCheckpoint(program);
 registerWrapup(program);
 registerImpact(program);
+registerStyleAnchor(program);
 
 try {
   await program.parseAsync(process.argv);

@@ -9,6 +9,7 @@ vite.config.ts.timestamp-*.mjs
 .probe-book/
 .probe-empty/
 .probe-plan/
+.probe-style/
 
 # 本仓 agent 工作记忆（本地态；按 docs/10 的定位不随仓分发）
 .workbuddy/

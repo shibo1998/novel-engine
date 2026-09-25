@@ -106,6 +106,7 @@
 | B-61 | 文档写明「`PUT /chapter` 刻意不设闸门」——README 关键边界 + 架构契约决策记录（不写下来日后必被当漏洞「修」） | 2026-09-25 · 0ea2b10 |
 | B-56 | legacy 手册归档到 `docs/legacy/`（`docs/legacy-README.md` → `docs/legacy/README.md`，同 SKILL） | 2026-09-25 · 见下 |
 | B-55 | `content/` 清理**清单**已出（`docs/28-content清理清单.md`）：建议删 `oc-kaleidos`+`oc-kosmos`（642K）+`weekly-meme-report`（44K）；`wuhang-*` 列出但**不建议删**（与 `plan`/`write` 功能重叠属 B-54）。★**未删任何文件，等作者确认** | 2026-09-25 · 见下 |
+| B-48 | `novel style-anchor` 文风样稿提炼：调用检查器的 `--suggest-rhythm`（**判据不重写**），解析出指标分位表 + 可粘贴的 `checks.rhythm` 阈值 + 「按此值 N/M 篇会被拦」，`--write` 落 `anchors/style.md`。★**没样本时明确报错**（不返回「指标全 0」）；★产物是**锚点不是闸门**（改它不生效，要改标准得改 book.json）；★提醒「按现状校准只会固化现状」 | 2026-09-25 · 见下 |
 | B-41 | 设定变更影响分析 `novel impact`：①分析（全文扫关键词 + 事实库相关角色 + 台账相关伏笔）②**人工圈定** `--chapters` ③**按章号升序**逐章定点重写。★不加 `--chapters` 时**不动任何文件**；★`--rewrite` 强制升序+串行（先改后章会让它读到旧的前章）；★中途失败**停下**不继续 | 2026-09-25 · 见下 |
 | B-42 | `novel wrapup` 完本报告：伏笔回收率（分母 = 登记 − 放弃）、未回收 core 级伏笔、角色成长线（断线/境界不推进/死亡未交代）、时间线收束。★**抽取覆盖率是 blocker 不是脚注**——所有比率的可信度都取决于它；★**只报事实不评好坏**（「节奏偏慢」没有可靠判据，硬报就是编） | 2026-09-25 · 见下 |
 | B-24 | 两步提交 + 快照 checkpoint + resume + rollback：`state/checkpoints/cp-NNNN.json`（含 story.json 完整快照 + 章文件指纹）+ `state/run.pendingCommit`（记**目标指纹**）+ `state/journal.jsonl`（追加式流水）。★`resume` 按目标指纹判定**补完/回退**；★`restoreFrom` 对**来历不明**的 state 拒绝覆盖（需 `--force`）；★`rollback` **不改正文**（列出来交给书仓 git）；保留策略「最近 50 份 + 每卷末 1 份」 | 2026-09-25 · 见下 |
@@ -126,6 +127,6 @@
 > 随 B-01/B-02 一并修掉的基建缺陷：`packages/core` 的 `test` 脚本是**硬编码文件清单**，
 > 新增的 `test/memory-context.test.ts` 没被登记 → 实际只跑 55 项，B-01/B-02 的 4 项测试
 > 从未执行过。已改为 `"test/**/*.test.ts"`。（此类「测试在但不跑」的坑与 B-15「测试基建」
-> 同类，登记为教训。）当前全量：core 207 + cli 18 = **225 项全绿，0 跳过**
+> 同类，登记为教训。）当前全量：core 211 + cli 18 = **229 项全绿，0 跳过**
 > （gates 检查器固件已增至 **19 项**，覆盖 4 个检查器）
 > （另含 gates 检查器的 9 项 Python 固件，经 `gates-python.test.ts` 一并跑）。

@@ -320,3 +320,57 @@ export async function runGates(opts: RunGatesOptions): Promise<GateResult> {
   }
   return assertGateResult(parsed, stdout);
 }
+
+// ── 检查器的 CLI 模式（B-48 用）─────────────────────────────────────────────
+
+export interface GateCliResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * 跑检查器的**CLI 模式**（如 `consistency_check.py --suggest-rhythm`）。
+ *
+ * 与 `runGates` 的区别：那条线要求 stdout 是单个 GateResult JSON（门禁契约）；
+ * 这条线是「检查器提供的工具型子命令」，输出是人类可读的（可能带一段 JSON）。
+ *
+ * ★**为什么不把 `--suggest-rhythm` 的判据在 TS 重写一遍**：
+ * 那套节拍口径（叙述句均长、长句占比、短句占比、对话占比、转折词密度）
+ * 在 Python 侧已经实现且与机检**共用同一份 `rhythm_stats`**。
+ * 在 TS 再写一份 = 同一判据两个副本，必然漂移——本项目已为此吃过多次亏
+ * （「禁止同脚本重复副本」是项目 MEMORY 里的既有裁决）。这里只做调用与解析。
+ */
+export async function runGateCli(opts: {
+  bookRoot: string;
+  gate?: string;
+  args: string[];
+  python?: string;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}): Promise<GateCliResult> {
+  const py = opts.python ?? process.env['NOVEL_PYTHON'] ?? (process.platform === 'win32' ? 'python' : 'python3');
+  const gate = opts.gate ?? 'consistency_check';
+  const bookRoot = path.resolve(opts.bookRoot);
+  const rootStat = statSync(bookRoot, { throwIfNoEntry: false });
+  if (rootStat === undefined || !rootStat.isDirectory()) {
+    throw new GateFailureError('root', `bookRoot 不是目录（--root 打错一层？）：${bookRoot}`);
+  }
+  const gatePath = fileURLToPath(new URL(`../../../gates/${gate}.py`, import.meta.url));
+  if (!existsSync(gatePath)) {
+    throw new GateFailureError('spawn', `gate 脚本不存在：${gatePath}`);
+  }
+  const child = spawn(py, [gatePath, '--root', bookRoot, ...opts.args], {
+    env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+    windowsHide: true,
+  });
+  const collected = await collect(child, resolveTimeoutMs(opts.timeoutMs), opts.signal);
+  if (!collected.ok) {
+    throw new GateFailureError(
+      collected.kind,
+      `gate CLI 执行失败（${collected.kind}）：${gate} ${opts.args.join(' ')}\n  详情：${collected.detail}\n`
+        + `  stderr：\n    ${headLines(collected.stderr) || '(无)'}`,
+    );
+  }
+  return { code: collected.code, stdout: collected.stdout, stderr: collected.stderr };
+}
