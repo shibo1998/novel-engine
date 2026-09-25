@@ -74,6 +74,8 @@ export type { ChapterReadiness, OutlineScope } from './readiness.js';
 export { recordFeedback, loadFeedback, diffLines } from './feedback.js';
 export type { DiffHunk } from './feedback.js';
 export { collectStats, editedLineCount } from './stats.js';
+export { buildWrapUpReport } from './wrapup.js';
+export type { WrapUpReport, CharacterArc } from './wrapup.js';
 export {
   extractChapter,
   readFacts,
