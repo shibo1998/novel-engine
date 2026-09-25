@@ -513,3 +513,25 @@ test('★B-41：novel impact 只分析不动文件；--rewrite 必须配 --chapt
     await rm(path.dirname(root), { recursive: true, force: true });
   }
 });
+
+test('★B-40：novel planner next 可用；未开启逐层流程时明确报错', async () => {
+  const root = await newBook(['--no-plan']);
+  try {
+    // 没开逐层流程 → 明确报错，不静默当成「第 1 卷」
+    const r = await novel(['planner', 'next', '--book', root]);
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /未开启逐层流程/);
+    assert.match(r.stderr, /novel plan init/, '要给出下一步');
+
+    // 开启后：下一卷是第 1 卷
+    await novel(['plan', 'init', '--book', root]);
+    const r2 = await novel(['planner', 'next', '--book', root]);
+    assert.equal(r2.code, 0, `planner next 应成功：\n${r2.stderr}`);
+    const info = json<{ volume: number; knownVolumes: number[] }>(r2.stdout);
+    assert.equal(info.volume, 1);
+    assert.deepEqual(info.knownVolumes, []);
+    assert.match(r2.stderr, /下一卷：第 1 卷/);
+  } finally {
+    await rm(path.dirname(root), { recursive: true, force: true });
+  }
+});

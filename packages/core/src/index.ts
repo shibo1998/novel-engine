@@ -76,6 +76,14 @@ export type { DiffHunk } from './feedback.js';
 export { collectStats, editedLineCount } from './stats.js';
 export { buildWrapUpReport } from './wrapup.js';
 export { buildStyleAnchor } from './style-anchor.js';
+export {
+  reviseCompass,
+  expandNextVolume,
+  nextVolume,
+  layerConfirmed,
+  PlannerError,
+} from './planner.js';
+export type { PlannerDraftResult, NextVolumeInfo } from './planner.js';
 export type { StyleAnchorReport, StyleMetric, BuildStyleAnchorOptions } from './style-anchor.js';
 export { analyzeImpact, rewriteInOrder } from './impact.js';
 export type { ImpactReport, ImpactHit, RewriteInOrderOptions, RewriteInOrderResult } from './impact.js';

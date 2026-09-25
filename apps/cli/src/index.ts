@@ -24,6 +24,7 @@ import { registerCheckpoint } from './commands/checkpoint.js';
 import { registerWrapup } from './commands/wrapup.js';
 import { registerImpact } from './commands/impact.js';
 import { registerStyleAnchor } from './commands/style-anchor.js';
+import { registerPlanner } from './commands/planner.js';
 
 program.name('novel').description('novel-engine 命令行外壳').version('0.0.0');
 
@@ -51,6 +52,7 @@ registerCheckpoint(program);
 registerWrapup(program);
 registerImpact(program);
 registerStyleAnchor(program);
+registerPlanner(program);
 
 try {
   await program.parseAsync(process.argv);
