@@ -21,12 +21,30 @@ state/          预留状态目录（书级 state 在各书根目录下）
 
 书的数据**不在仓库内**：每本书有自己的 `<bookRoot>/`（chapters/ + .soloent/ + state/）。
 
-## 配置（**只有环境变量，没有配置文件**）
+## 配置（环境变量 **或** 用户级配置文件）
 
-★**本项目刻意不设配置文件**：LLM 凭据只走 env，绝不写入 `book.json`（作者曾明确要求）。
-也不读 `.env` 文件——建一个不会被加载，别浪费时间去找。
+★**LLM 凭据绝不写入 `book.json`**（那是书的配置，会进版本控制）。
+配置有两种方式，**环境变量优先**，两者都配时 env 赢。
 
-### 必配（缺任一都会报「环境变量缺失」并 exit 2）
+### 方式一（推荐给「不想每次 export」的人）：用户级配置文件
+
+路径：`~/.novel-engine/config.json`（即 `C:\Users\<你>\.novel-engine\config.json`，可用 `NOVEL_CONFIG_FILE` 改）。
+
+```json
+{
+  "baseUrl": "https://your-endpoint/v1",
+  "apiKey": "sk-...",
+  "model": "your-model",
+  "models": { "judge": "更小更便宜的模型", "summary": "..." }
+}
+```
+
+★**为什么放在用户主目录、而不是仓库里**：里面有 API key。
+放主目录就不在任何 git 仓库内，**从根上消掉被 `git add -A` 误提交的可能**；
+工具若发现配置文件落在某个 git 仓库内会警告一次。
+★**工具绝不替你写这个文件**（没有 `config set`）——写密钥到磁盘的动作必须由你自己做。
+
+### 方式二：环境变量（CI / 测试 / 临时切换）
 
 ```bash
 export LLM_BASE_URL=https://your-endpoint/v1   # OpenAI 兼容端点
@@ -35,24 +53,23 @@ export LLM_MODEL=your-model
 ```
 
 ⚠️ **注意变量名没有 `NOVEL_` 前缀**——就是 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`。
-
-Windows 下用 Git Bash 同上；用 PowerShell 则是 `setx` 或在当前会话里赋值（不落盘更安全）。
+也不支持 `.env` 文件（不引 dotenv）。
 
 ### 可选：按用途换模型（省 token）
 
-不给就都用 `LLM_MODEL`。★**起草与修订刻意不共用**——定稿质量主要取决于这两步，
-不该被「省 token」顺手降级；蓝图起草反而建议更大（后续几十章都按它写）。
+不给就都用 `LLM_MODEL`（或配置文件里的 `model`）。★**起草与修订刻意不共用**——
+定稿质量主要取决于这两步，不该被「省 token」顺手降级；蓝图起草反而建议更大。
 
-| 变量 | 用途 | 建议 |
-|---|---|---|
-| `NOVEL_MODEL_DRAFT` | 起草正文 | **别调小** |
-| `NOVEL_MODEL_REVISE` | 定点修订 / 整章重写 | **别调小** |
-| `NOVEL_MODEL_JUDGE` | 语义判据（判对错） | 可小 |
-| `NOVEL_MODEL_SUMMARY` | 摘要/状态卡（压缩信息） | 可小 |
-| `NOVEL_MODEL_EXTRACT` | 事实抽取（结构化输出） | 可小 |
-| `NOVEL_MODEL_PLAN` | 逐层蓝图起草（影响全局） | 建议更大 |
+| 用途 | 环境变量 | 配置文件键 | 建议 |
+|---|---|---|---|
+| 起草正文 | `NOVEL_MODEL_DRAFT` | `models.draft` | **别调小** |
+| 定点修订 / 整章重写 | `NOVEL_MODEL_REVISE` | `models.revise` | **别调小** |
+| 语义判据（判对错） | `NOVEL_MODEL_JUDGE` | `models.judge` | 可小 |
+| 摘要 / 状态卡 | `NOVEL_MODEL_SUMMARY` | `models.summary` | 可小 |
+| 事实抽取 | `NOVEL_MODEL_EXTRACT` | `models.extract` | 可小 |
+| 逐层蓝图起草 | `NOVEL_MODEL_PLAN` | `models.plan` | 建议更大 |
 
-### 可选：稳定性与排查
+### 其它环境变量
 
 | 变量 | 默认 | 作用 |
 |---|---|---|

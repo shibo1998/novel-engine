@@ -1,7 +1,7 @@
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildPrompt } from './prompt.js';
-import { callLLM, type CallLLMOptions } from './llm.js';
+import { callLLM, modelFor, type CallLLMOptions } from './llm.js';
 import { applyGateResult, BLOCKING_SEVERITIES, isPassingWorst, readState, snapshotChapterHashes, writeState } from './state.js';
 import { runGates } from './gates.js';
 import { judgeChapter, JudgesNotDeclared, writeJudgeStatus } from './judges.js';
@@ -77,7 +77,7 @@ async function writeChapterLocked(o: WriteChapterOptions): Promise<WriteChapterR
   const entry = state.chapters.find((c) => c.chapterNo === o.chapterNo);
   if (entry !== undefined) {
     entry.generatedBy = {
-      model: process.env['LLM_MODEL'] ?? '(未知)',
+      model: modelFor('draft') || '(未知)',
       promptHash: bundle.hash ?? '',
       at: new Date().toISOString(),
     };

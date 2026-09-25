@@ -2,6 +2,7 @@ export * from './types.js';
 export { buildPrompt, loadRules, auditRules, RuleFileMissing } from './prompt.js';
 export type { RuleAudit } from './prompt.js';
 export { callLLM, isRetryable, llmBreakerState, resetLlmBreaker, modelFor } from './llm.js';
+export { reloadLlmConfig, llmConfigFile, resolveLlmSetting } from './llmconfig.js';
 export type { CallLLMOptions, LlmPurpose } from './llm.js';
 export { runGates, runGateCli, GateFailureError, parseGateError, assertNoResultOnFailure } from './gates.js';
 export type { RunGatesOptions, GateCliResult } from './gates.js';

@@ -373,6 +373,9 @@ test('★B-50：modelFor 按用途取 env，显式覆盖优先，缺省回退 LL
   const { modelFor } = await import('../src/index.js');
   const saved = { ...process.env };
   try {
+    // ★必须钉死配置文件：B-31 之后 LLM 配置有了第二种来源（~/.novel-engine/config.json），
+    // 不钉死的话这条用例的结果取决于「作者磁盘上碰巧有什么」。
+    process.env['NOVEL_CONFIG_FILE'] = path.join(tmpdir(), 'novel-test-无此配置文件.json');
     Object.assign(process.env, {
       LLM_MODEL: 'big', NOVEL_MODEL_JUDGE: 'small-judge', NOVEL_MODEL_SUMMARY: 'small-sum',
     });

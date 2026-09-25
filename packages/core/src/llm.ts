@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { contentHash } from './hash.js';
 import type { LLMError, LLMResult, PromptBundle } from './types.js';
+import { resolveLlmSetting, resolveModelFor } from './llmconfig.js';
 
 export interface CallLLMOptions {
   temperature?: number;
@@ -24,24 +25,12 @@ export interface CallLLMOptions {
 
 export type LlmPurpose = 'draft' | 'revise' | 'judge' | 'summary' | 'extract' | 'plan';
 
-const PURPOSE_ENV: Record<LlmPurpose, string> = {
-  draft: 'NOVEL_MODEL_DRAFT',
-  revise: 'NOVEL_MODEL_REVISE',
-  judge: 'NOVEL_MODEL_JUDGE',
-  summary: 'NOVEL_MODEL_SUMMARY',
-  extract: 'NOVEL_MODEL_EXTRACT',
-  plan: 'NOVEL_MODEL_PLAN',
-};
-
 /**
  * 按用途选模型（B-50）。**只在这里决定**——散在各调用点必然漂移。
  * 没配该用途的 env → 回退 `LLM_MODEL`；`LLM_MODEL` 也没有 → 空串（由 callLLM 报「环境变量缺失」）。
  */
 export function modelFor(purpose: LlmPurpose, explicit?: string): string {
-  if (explicit !== undefined && explicit !== '') return explicit;
-  const byPurpose = process.env[PURPOSE_ENV[purpose]];
-  if (byPurpose !== undefined && byPurpose !== '') return byPurpose;
-  return process.env['LLM_MODEL'] ?? '';
+  return resolveModelFor(purpose, explicit);
 }
 
 const TIMEOUT_MS = 60_000;
@@ -184,8 +173,8 @@ export async function callLLM(b: PromptBundle, o: CallLLMOptions = {}): Promise<
     };
   }
 
-  const base = process.env['LLM_BASE_URL'];
-  const key = process.env['LLM_API_KEY'];
+  const base = resolveLlmSetting('LLM_BASE_URL');
+  const key = resolveLlmSetting('LLM_API_KEY');
   const missing = [
     ...(base === undefined || base === '' ? ['LLM_BASE_URL'] : []),
     ...(key === undefined || key === '' ? ['LLM_API_KEY'] : []),
@@ -204,10 +193,13 @@ export async function callLLM(b: PromptBundle, o: CallLLMOptions = {}): Promise<
       ok: false,
       kind: 'config',
       detail: `环境变量缺失: ${missing.join(', ')}\n`
-        + '  模型配置**只走环境变量，没有配置文件**（也不读 .env）——别去找配置文件了。\n'
-        + '  设置（Git Bash / Linux）：\n'
+        + '  模型配置有两种方式（**变量名没有 NOVEL_ 前缀**）：\n'
+        + '  ① 环境变量：\n'
         + lines.join('\n') + '\n'
-        + '  ⚠️ 变量名**没有 NOVEL_ 前缀**。详见 README 的「配置」一节。',
+        + '  ② 配置文件 ~/.novel-engine/config.json（不想每次 export 就用它）：\n'
+        + '    {"baseUrl":"https://your-endpoint/v1","apiKey":"sk-...","model":"your-model"}\n'
+        + '  ★文件放在用户主目录（不在任何 git 仓库里），API key 不会被误提交；\n'
+        + '    环境变量优先于文件。详见 README 的「配置」一节。',
     };
   }
 

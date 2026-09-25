@@ -42,6 +42,9 @@ async function withEnv(over: Record<string, string | undefined>, fn: () => Promi
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
+  // ★B-31 之后 LLM 配置有了第二种来源（~/.novel-engine/config.json）。
+  // 不把它钉死，测试结果就取决于「作者磁盘上碰巧有什么」——那正是测试要消灭的不确定性。
+  process.env['NOVEL_CONFIG_FILE'] = path.join(tmpdir(), 'novel-test-无此配置文件.json');
   resetLlmBreaker();
   try {
     await fn();

@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { callLLM, type CallLLMOptions } from './llm.js';
+import { callLLM, modelFor, type CallLLMOptions } from './llm.js';
 import { readState } from './state.js';
 import { contentHash } from './hash.js';
 import type { LLMError } from './types.js';
@@ -336,7 +336,7 @@ export async function extractChapter(o: ExtractOptions): Promise<ExtractResult> 
   const facts: ChapterFacts = {
     extractedAt: new Date().toISOString(),
     contentHash: contentHash(text),
-    model: process.env['LLM_MODEL'] ?? '(未知)',
+    model: modelFor('extract') || '(未知)',
     ...parsed,
   };
 
