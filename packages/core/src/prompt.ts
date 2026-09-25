@@ -163,6 +163,27 @@ function extractBookMeta(cfg: Record<string, unknown>): BookMeta {
   return { title: pick('title'), genre: pick('genre'), platform: pick('platform') };
 }
 
+/** 当前状态卡上限（码点）：与摘要段同量级，防 now.md 越写越长把上下文吃光 */
+const STATE_CARD_CHAR_CAP = 3000;
+const STATE_CARD_DEFAULT_PATH = '.soloent/memory/now.md';
+
+/**
+ * 当前状态卡（B-01）：draft 追加块，读 book.json 的 paths.now（缺省 .soloent/memory/now.md）。
+ * 只追加，不改动其它块。文件缺失、或仍是 init 的「（待填）」占位 → 返回空串（不注入空壳）。
+ */
+async function readStateCard(root: string, cfg: Record<string, unknown>): Promise<string> {
+  const paths = (cfg['paths'] ?? {}) as Record<string, unknown>;
+  const rel = typeof paths['now'] === 'string' && paths['now'] !== '' ? (paths['now'] as string) : STATE_CARD_DEFAULT_PATH;
+  const raw = stripBom(await readFile(path.join(root, rel), 'utf-8').catch(() => '')).trim();
+  const body = raw.replace(/^#[^\n]*\n?/, '').trim();
+  if (body === '' || /^[（(]待填[）)]$/.test(body)) return '';
+  const chars = [...raw];
+  const text = chars.length <= STATE_CARD_CHAR_CAP
+    ? raw
+    : chars.slice(0, STATE_CARD_CHAR_CAP).join('') + '\n（……超出上限，已截断）';
+  return [`# 当前状态卡（来源：${rel}；人物境界/位置/伤势/持有物、未回收伏笔以此为准）`, text].join('\n');
+}
+
 function formatFinding(f: GateFinding): string {
   const where = f.line > 0 ? `第 ${f.line} 行` : '整章';
   const detail = f.detail !== '' ? `｜原文：${f.detail}` : '';
@@ -189,7 +210,7 @@ export async function buildPrompt(o: BuildPromptOptions): Promise<PromptBundle> 
   const prevTail = prev !== undefined ? await readPrevTail(root, prev.file) : '';
 
   // 4.9 长文上下文：最近 2 章摘要 + 关键词相关 2 章摘要（摘要缺失 = 显式标注「暂无」，非静默跳过）
-  const longCtx = await assembleLongContext(root, o.chapterNo, prevTail);
+  const longCtx = await assembleLongContext(root, o.chapterNo, prevTail, readiness.outlineText ?? '');
   const summarySection = ((): string => {
     const blocks: string[] = [];
     if (longCtx.recentSummaries.length > 0) {
@@ -224,6 +245,7 @@ export async function buildPrompt(o: BuildPromptOptions): Promise<PromptBundle> 
   ];
 
   const system = [IDENTITY, canon, ...rules].filter((s) => s.trim() !== '').join('\n\n');
+  const stateCard = await readStateCard(root, cfg);
 
   let user: string;
   if (o.mode === 'draft') {
@@ -242,6 +264,7 @@ export async function buildPrompt(o: BuildPromptOptions): Promise<PromptBundle> 
       '',
       summarySection,
       '',
+      ...(stateCard !== '' ? [stateCard, ''] : []),
       '# 要求',
       '- 直接续写上一章之后的情节，不回头复述已发生内容',
       '- 单章一个主冲突，章末留钩子',

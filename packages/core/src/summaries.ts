@@ -1,4 +1,4 @@
-import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { callLLM } from './llm.js';
 import { readState } from './state.js';
@@ -75,8 +75,17 @@ export interface LongContext {
   relatedSummaries: ChapterSummary[];
 }
 
-/** 4.9 组装：写第 N 章时 = 最近 2 章摘要 + 按关键词取 2 章相关摘要（prevTail 由 buildPrompt 单独带） */
-export async function assembleLongContext(bookRoot: string, chapterNo: number, prevTail: string): Promise<LongContext> {
+/**
+ * 4.9 组装：写第 N 章时 = 最近 2 章摘要 + 按关键词取 2 章相关摘要（prevTail 由 buildPrompt 单独带）。
+ * 关键词源 = 上一章末尾 ∪ 本章细纲（B-02）：本章要出场、但上一章没露面的人和地点，
+ * 只出现在细纲里——只看 prevTail 就永远召不回他们上次出场的那章。
+ */
+export async function assembleLongContext(
+  bookRoot: string,
+  chapterNo: number,
+  prevTail: string,
+  outlineText = '',
+): Promise<LongContext> {
   const state = await readState({ bookRoot });
   const store = await readSummaries(bookRoot);
   const prev = state.chapters.filter((c) => c.chapterNo < chapterNo);
@@ -86,7 +95,7 @@ export async function assembleLongContext(bookRoot: string, chapterNo: number, p
   };
   const recent = prev.slice(-2).map(pick).filter((s): s is ChapterSummary => s !== undefined);
   const recentFiles = new Set(prev.slice(-2).map((c) => c.file));
-  const kw = bigrams(prevTail);
+  const kw = new Set([...bigrams(prevTail), ...bigrams(outlineText)]);
   const related = prev
     .filter((c) => !recentFiles.has(c.file))
     .map((c) => ({ s: pick(c), c }))
@@ -126,4 +135,36 @@ export async function updateChapterSummary(bookRoot: string, chapterNo: number):
   };
   await writeSummaries(store);
   return r;
+}
+
+/**
+ * 当前状态卡更新**建议**（B-01）：读现有 now.md + 本章正文，让 LLM 给出更新后的全文，
+ * 只写到 state/now.proposed.md，**绝不覆盖 now.md**——now.md 里有闸门要校验的状态块与流程留痕，
+ * 由作者比对后手工合并（人工确认即合并动作本身）。失败不写任何东西。
+ */
+export async function proposeStateCard(bookRoot: string, chapterNo: number): Promise<LLMResult & { proposedFile?: string }> {
+  const root = path.resolve(bookRoot);
+  const state = await readState({ bookRoot: root });
+  const entry = state.chapters.find((c) => c.chapterNo === chapterNo);
+  if (entry === undefined) throw new Error(`proposeStateCard：第 ${chapterNo} 章不在索引中`);
+  const cfgRaw = await readFile(path.join(root, '.soloent', 'book.json'), 'utf-8').catch(() => '{}');
+  const cfg = JSON.parse(cfgRaw.replace(/^﻿/, '')) as { paths?: { now?: unknown } };
+  const rel = typeof cfg.paths?.now === 'string' && cfg.paths.now !== '' ? cfg.paths.now : '.soloent/memory/now.md';
+  const current = (await readFile(path.join(root, rel), 'utf-8').catch(() => '')).replace(/^﻿/, '');
+  const text = await readFile(path.join(root, 'chapters', entry.file), 'utf-8');
+  const r = await callLLM({
+    system: [
+      '你是中文长篇小说的连续性记录员。根据「本章正文」更新「当前状态卡」，输出更新后的状态卡全文（markdown）。',
+      '- 保留原有的标题、小节结构、HTML 注释状态块与「[流程]」留痕行，原样不动；',
+      '- 只更新受本章影响的内容：人物境界/位置/伤势/持有物/关系、新埋与已回收的伏笔、故事时间进度；',
+      '- 正文没写到的不要推测补充；不要评点；只输出状态卡本身。',
+    ].join('\n'),
+    user: [`# 当前状态卡（${rel}）`, current !== '' ? current : '（空）', '', `# 本章正文（第 ${chapterNo} 章）`, text].join('\n'),
+    ruleRefs: { author: [], plugin: [] },
+  });
+  if (!r.ok) return r;
+  const target = path.join(root, 'state', 'now.proposed.md');
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, r.text.trim() + '\n', 'utf-8');
+  return { ...r, proposedFile: path.relative(root, target).split(path.sep).join('/') };
 }

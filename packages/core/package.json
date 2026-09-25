@@ -14,7 +14,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json",
-    "test": "tsx --test test/core.test.ts test/feedback.test.ts test/rules-audit.test.ts test/hooks.test.ts test/readiness.test.ts test/gate-invariants.test.ts test/converge-advisory.test.ts test/style-gate.test.ts"
+    "test": "tsx --test \"test/**/*.test.ts\""
   },
   "devDependencies": {
     "@types/node": "20",
