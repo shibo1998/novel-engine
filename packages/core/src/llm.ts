@@ -1,3 +1,6 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { contentHash } from './hash.js';
 import type { LLMError, LLMResult, PromptBundle } from './types.js';
 
 export interface CallLLMOptions {
@@ -59,12 +62,80 @@ export function isRetryable(err: LLMError): boolean {
   return false;
 }
 
+// ── 录像 / 回放（B-26，v0.2 M7.6）───────────────────────────────────────────
+//
+// 治的是什么：凡是「调模型的代码路径」都没法写确定性测试——要么每跑一次真烧钱，
+// 要么只能测到「它没崩」。结果是 Judge / plan draft / 摘要 这些**判据型**逻辑
+// 全都只有纯函数部分被测到，真正「模型说了什么、我们怎么处理」那一段无人看守。
+//
+// 两个环境变量，两个方向：
+//   `NOVEL_LLM_RECORD_DIR=<dir>`  跑真调用，把每次请求/响应落到 `<dir>/<请求指纹>.json`
+//   `NOVEL_LLM_REPLAY_DIR=<dir>`  不碰网络，按请求指纹取回放；**取不到就失败关闭**
+//
+// ★三条纪律：
+//   1. **回放未命中 → 失败，绝不回退到真调模型。** 回退会让「夹具过期」伪装成
+//      「测试通过但悄悄烧了钱」，也让离线环境里的失败原因变得不可理解。
+//   2. **录像脱敏**：只存 model / system / user / 响应文本，**绝不写 Authorization**。
+//      录像会进版本控制，密钥写进去就是泄漏。
+//   3. **回放不需要 LLM_API_KEY**：它压根不发请求。否则「离线确定性测试」还得先配密钥，
+//      那就不是离线的了。
+
+/** 请求指纹：同一份 prompt + 同一个模型 → 同一个 hash。与 gateStatus 用的是同一套 contentHash */
+function requestHash(model: string, b: PromptBundle): string {
+  return contentHash(`${model}\n\u0000\n${b.system}\n\u0000\n${b.user}`);
+}
+
+interface LlmRecording {
+  hash: string;
+  at: string;
+  model: string;
+  /** 请求（脱敏：只有这三样，没有密钥、没有 header） */
+  request: { system: string; user: string };
+  response: { text: string };
+}
+
+async function replayOrNull(dir: string, hash: string): Promise<LLMResult | null> {
+  const raw = await readFile(path.join(dir, `${hash}.json`), 'utf-8').catch(() => null);
+  if (raw === null) return null;
+  try {
+    const rec = JSON.parse(raw) as LlmRecording;
+    if (typeof rec.response?.text !== 'string' || rec.response.text === '') return null;
+    return { ok: true, text: rec.response.text };
+  } catch {
+    return null;
+  }
+}
+
+async function recordCall(dir: string, rec: LlmRecording): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, `${rec.hash}.json`), JSON.stringify(rec, null, 2) + '\n', 'utf-8');
+}
+
 /**
  * 手写薄 HTTP 封装（OpenAI 兼容端点），不用任何厂商 SDK——换厂商只改 env。
  * env：LLM_BASE_URL / LLM_API_KEY / LLM_MODEL；API key 只走 env，绝不写入 book.json。
  * 全程不 throw 裸 Error，错误一律归一成 LLMResult union。
  */
 export async function callLLM(b: PromptBundle, o: CallLLMOptions = {}): Promise<LLMResult> {
+  const model = process.env['LLM_MODEL'] ?? '(未知)';
+  const hash = requestHash(model, b);
+
+  // 回放先于一切（也先于熔断与 env 检查）：它不发请求，自然不该受熔断影响，
+  // 也不该要求 LLM_API_KEY —— 否则「离线确定性测试」还得先配密钥，那就不是离线的了。
+  const replayDir = process.env['NOVEL_LLM_REPLAY_DIR'];
+  if (replayDir !== undefined && replayDir !== '') {
+    const hit = await replayOrNull(replayDir, hash);
+    if (hit !== null) return hit;
+    // ★失败关闭：不回退到真调模型。回退会让「夹具过期」伪装成「测试通过但悄悄烧钱」。
+    return {
+      ok: false,
+      kind: 'config',
+      detail: `回放未命中：${path.join(replayDir, `${hash}.json`)} 不存在或不可用。\n`
+        + `  请求指纹 ${hash}（model=${model}）。\n`
+        + '  处置：用 NOVEL_LLM_RECORD_DIR 重新录一遍；**不会**回退到真调模型。',
+    };
+  }
+
   // 熔断先于一切：断路期间连 env 都不看，直接失败——熔断的全部意义就是「别再发请求」
   const now = Date.now();
   if (now < openedUntil) {
@@ -78,7 +149,6 @@ export async function callLLM(b: PromptBundle, o: CallLLMOptions = {}): Promise<
 
   const base = process.env['LLM_BASE_URL'];
   const key = process.env['LLM_API_KEY'];
-  const model = process.env['LLM_MODEL'];
   const missing = [
     ...(base === undefined || base === '' ? ['LLM_BASE_URL'] : []),
     ...(key === undefined || key === '' ? ['LLM_API_KEY'] : []),
@@ -126,6 +196,17 @@ export async function callLLM(b: PromptBundle, o: CallLLMOptions = {}): Promise<
         .choices?.[0]?.message?.content;
       if (typeof content !== 'string' || content === '') {
         return { ok: false, kind: 'parse', detail: 'choices[0].message.content 缺失或为空' };
+      }
+      // 录像（B-26）：只存 model / prompt / 响应文本，**绝不写 Authorization**
+      const recordDir = process.env['NOVEL_LLM_RECORD_DIR'];
+      if (recordDir !== undefined && recordDir !== '') {
+        await recordCall(recordDir, {
+          hash,
+          at: new Date().toISOString(),
+          model,
+          request: { system: b.system, user: b.user },
+          response: { text: content },
+        }).catch(() => undefined);
       }
       return { ok: true, text: content };
     } catch (e) {

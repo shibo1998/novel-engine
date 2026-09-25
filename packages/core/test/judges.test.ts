@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -13,6 +14,8 @@ import {
   parseJudgeOutput,
   readJudgeDecl,
   readJudgeStatus,
+  judgeChapter,
+  resetLlmBreaker,
   scaffoldJudges,
   writeJudgeStatus,
 } from '../src/index.js';
@@ -298,6 +301,84 @@ test('★readJudgeStatus：内容指纹不符 → 该章判据结论作废（v2 
     await writeFile(abs, CHAPTER + '\n他攥紧了拳头。\n', 'utf-8');
     assert.equal(Object.keys((await readJudgeStatus(root)).chapters).length, 0, '内容变了结论即失效');
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// ── B-65：judgeChapter 的 LLM 路径确定性测试（靠 B-26 的录像回放）────────────
+//
+// 这一段此前**完全没测过**：纯函数 evaluateCriteria 测了，但「prompt 怎么拼、
+// 调用怎么发、结果怎么落盘」那条链路一次都没跑过。有了回放才谈得上确定性测试。
+
+const JUDGE_PAYLOAD = {
+  results: [
+    { criterion: 'j2-hook', verdict: 'fail', quote: '他握紧了那枚玉简', reason: '章末平铺收束，无牵引' },
+    { criterion: 'j1-blueprint', verdict: 'fail', quote: '这句话根本不在正文里', reason: '细纲要点未覆盖' },
+    { criterion: 'j3-continuity', verdict: 'pass', quote: '他握紧了那枚玉简', reason: '与状态卡无冲突' },
+  ],
+};
+
+test('★B-65：judgeChapter 全链路（prompt→调用→解析→引句核对→落盘）可确定性复现', async () => {
+  const root = await makeBook();
+  const recDir = await mkdtemp(path.join(tmpdir(), 'novel-judgerec-'));
+  let requests = 0;
+  const srv = createServer((_req, res) => {
+    requests += 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(JUDGE_PAYLOAD) } }] }));
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+  const addr = srv.address();
+  const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
+
+  const saved = { ...process.env };
+  const restore = (): void => {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+    resetLlmBreaker();
+  };
+  try {
+    await setDeclared(root, ['j1-blueprint', 'j2-hook', 'j3-continuity']);
+    await scaffoldJudges(root);
+    await writeFile(path.join(root, 'chapters', 'ch-05.md'), CHAPTER, 'utf-8');
+
+    // ① 录像
+    Object.assign(process.env, {
+      LLM_BASE_URL: `http://127.0.0.1:${port}`, LLM_API_KEY: 'k', LLM_MODEL: 'm',
+      NOVEL_LLM_RETRY_ATTEMPTS: '0', NOVEL_LLM_RECORD_DIR: recDir, NOVEL_LLM_REPLAY_DIR: undefined,
+    });
+    delete process.env['NOVEL_LLM_REPLAY_DIR'];
+    resetLlmBreaker();
+    const live = await judgeChapter({ bookRoot: root, chapterNo: 5 });
+    assert.equal(live.ok, true, `首次（真调用）应成功：${JSON.stringify(live)}`);
+    assert.equal(requests, 1);
+
+    // ② 回放：不碰网络、不需要密钥，结果必须逐字一致
+    Object.assign(process.env, { NOVEL_LLM_RECORD_DIR: undefined, NOVEL_LLM_REPLAY_DIR: recDir });
+    delete process.env['NOVEL_LLM_RECORD_DIR'];
+    delete process.env['LLM_BASE_URL'];
+    delete process.env['LLM_API_KEY'];
+    resetLlmBreaker();
+    const replay = await judgeChapter({ bookRoot: root, chapterNo: 5 });
+    assert.equal(replay.ok, true, '回放应成功');
+    assert.equal(requests, 1, '★回放不该产生任何网络请求');
+
+    // ③ 全链路语义：真引句成 finding、编造的引句降 unsure
+    if (live.ok && replay.ok) {
+      assert.deepEqual(replay.findings, live.findings, '回放结果必须与真调用逐字一致');
+      assert.equal(replay.findings.length, 1, '只有引句真实存在的那条成 finding');
+      assert.match(replay.findings[0]?.check ?? '', /^\[J2 章末钩子\]/);
+      assert.equal(replay.findings[0]?.detail, '他握紧了那枚玉简');
+      assert.equal(replay.manual.length, 1, '编造引句的那条进人工清单');
+      assert.equal(replay.manual[0]?.id, 'j1-blueprint');
+      assert.equal(replay.manual[0]?.evidence, 'not-found');
+      assert.equal(replay.manual[0]?.rawVerdict, 'fail', '原判要留着');
+      assert.deepEqual(replay.judges, ['j1-blueprint', 'j2-hook', 'j3-continuity'], '顺序 = 声明顺序');
+    }
+  } finally {
+    restore();
+    srv.close();
+    await rm(recDir, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
   }
 });
