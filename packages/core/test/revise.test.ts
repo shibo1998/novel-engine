@@ -169,3 +169,72 @@ test('★B-68：读出来的配置传进 applyPatches 真的改变行为（不�
     await rm(root, { recursive: true, force: true });
   }
 });
+
+// ── B-71：作者指令进 revise prompt ─────────────────────────────────────────
+
+test('★B-71：authorInstructions 会进 revise 的 prompt；为空时不加空标题段', async () => {
+  const { mkdtemp, mkdir, rm, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const path = await import('node:path');
+  const { createServer } = await import('node:http');
+  const { contentHash, readState, resetLlmBreaker } = await import('../src/index.js');
+
+  const root = await mkdtemp(path.join(tmpdir(), 'novel-steer-'));
+  try {
+    await mkdir(path.join(root, '.soloent'), { recursive: true });
+    await mkdir(path.join(root, 'chapters'), { recursive: true });
+    await mkdir(path.join(root, 'state'), { recursive: true });
+    await writeFile(path.join(root, '.soloent', 'book.json'), JSON.stringify({
+      _schema: 1, book: { title: 't' },
+      paths: { chapters: 'chapters', canon: '.soloent/canon.md', ledger: '.soloent/ledger.tsv', now: '.soloent/now.md' },
+      chapter: { file_regex: '^ch-(\\d+)\\.md$' },
+      ledger: { columns: ['章'], chapter_column: '章' },
+    }), 'utf-8');
+    const text = '他推开门，风灌进来。';
+    await writeFile(path.join(root, 'chapters', 'ch-01.md'), text, 'utf-8');
+
+    const prompts: string[] = [];
+    const srv = createServer((_req, res) => {
+      let body = '';
+      _req.on('data', (d) => { body += d; });
+      _req.on('end', () => {
+        const u = (JSON.parse(body) as { messages?: { role: string; content: string }[] })
+          .messages?.find((m) => m.role === 'user')?.content ?? '';
+        prompts.push(u);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        // 返回一个能定位的合法补丁，让流程走完
+        res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ patches: [{ quote: '他推开门，风灌进来。', replacement: '他推开门，冷风灌进来。', reason: 'x' }] }) } }] }));
+      });
+    });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    const addr = srv.address();
+    const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
+    const saved = { ...process.env };
+    try {
+      Object.assign(process.env, {
+        LLM_BASE_URL: `http://127.0.0.1:${port}`, LLM_API_KEY: 'k', LLM_MODEL: 'm', NOVEL_LLM_RETRY_ATTEMPTS: '0',
+        NOVEL_CONFIG_FILE: path.join(tmpdir(), 'novel-test-无此配置文件.json'),
+      });
+      resetLlmBreaker();
+
+      const { reviseByQuote } = await import('../src/index.js');
+      await reviseByQuote({
+        bookRoot: root, chapterNo: 1,
+        findings: [{ severity: '中等', chapter: 'ch-01.md', line: 1, check: '[M1] 节奏', detail: '他推开门，风灌进来。' }],
+        authorInstructions: ['把雨写得更冷', '删掉那句总结'],
+      });
+
+      assert.match(prompts[0] ?? '', /# 作者指令/, '有指令时要出现在 prompt 里');
+      assert.match(prompts[0] ?? '', /1\. 把雨写得更冷/);
+      assert.match(prompts[0] ?? '', /2\. 删掉那句总结/);
+      assert.match(prompts[0] ?? '', /与本轮发现冲突时.*优先执行/, '要说明优先级');
+    } finally {
+      Object.assign(process.env, saved);
+      resetLlmBreaker();
+      srv.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  } catch (e) {
+    throw e;
+  }
+});

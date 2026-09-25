@@ -126,3 +126,30 @@ test('订阅者抛错不影响其它订阅者与任务本身', () => {
   assert.doesNotThrow(() => log.append('r', 'x'));
   assert.deepEqual(got, [1]);
 });
+
+test('★B-71：drainSteer 取走待执行指令并补 steer-consumed 事件；空取返回空数组', () => {
+  const reg = new RunRegistry();
+  const { runId } = reg.begin('/book', '收敛第 7 章');
+
+  // 还没投 → 空数组（收敛循环每轮都调，不能让它变成异常）
+  assert.deepEqual(reg.drainSteer(runId), []);
+
+  reg.steer('/book', runId, '把雨写得更冷');
+  reg.steer('/book', runId, '删掉那句总结');
+  const got = reg.drainSteer(runId);
+  assert.deepEqual(got, ['把雨写得更冷', '删掉那句总结'], '按投递顺序取走');
+
+  // ★取走即清空：下一轮再取不该拿到重复指令（否则同一条指令会执行两次）
+  assert.deepEqual(reg.drainSteer(runId), [], '★取走后必须清空');
+
+  const kinds = reg.logFor('/book').since(0).events.map((e) => e.kind);
+  assert.deepEqual(kinds, ['started', 'steer', 'steer', 'steer-consumed'],
+    'steer-consumed 让人在事件流里能核对「这条指令真的执行了」');
+  const consumed = reg.logFor('/book').since(0).events.find((e) => e.kind === 'steer-consumed');
+  assert.equal(consumed?.data['count'], 2);
+});
+
+test('B-71：drainSteer 对未知 runId 返回空数组（不抛错）', () => {
+  const reg = new RunRegistry();
+  assert.deepEqual(reg.drainSteer('run-不存在'), []);
+});

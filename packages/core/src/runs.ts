@@ -121,6 +121,8 @@ export class RunRegistry {
   private readonly logs = new Map<string, RunEventLog>();
   private readonly runs = new Map<string, RunRecord>();
   private readonly aborts = new Map<string, AbortController>();
+  /** 每个 run 的待执行作者指令（`steer` 投入，`drainSteer` 取走） */
+  private readonly pending = new Map<string, string[]>();
 
   constructor(readonly maxEventsPerBook = 1000) {}
 
@@ -180,8 +182,32 @@ export class RunRegistry {
       .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
   }
 
-  /** 投递一条指令到某个 run 的事件流。**当前收敛循环不消费它**——见 BACKLOG 的后续项 */
+  /**
+   * 投递一条指令到某个 run。
+   *
+   * 指令进**待执行队列**（`drainSteer` 取走）**并**记一条 `steer` 事件
+   * （`consumed: false` —— 事件只追加不改写，消费与否由后续的
+   * `steer-consumed` 事件说明，不靠回头改这条）。
+   */
   steer(bookRoot: string, runId: string, instruction: string): RunEvent {
+    const q = this.pending.get(runId) ?? [];
+    q.push(instruction);
+    this.pending.set(runId, q);
     return this.logFor(bookRoot).append(runId, 'steer', { instruction, consumed: false });
+  }
+
+  /**
+   * 取走并清空某个 run 的待执行指令（B-71：收敛循环每轮开始时调一次）。
+   * 取走即「本轮会执行」——同时补一条 `steer-consumed` 事件，让人在事件流里
+   * 能看出「这条指令真的被执行了」，而不是投进去就石沉大海。
+   */
+  drainSteer(runId: string): string[] {
+    const q = this.pending.get(runId) ?? [];
+    this.pending.delete(runId);
+    if (q.length > 0) {
+      const rec = this.runs.get(runId);
+      if (rec !== undefined) this.logFor(rec.bookRoot).append(runId, 'steer-consumed', { count: q.length });
+    }
+    return q;
   }
 }

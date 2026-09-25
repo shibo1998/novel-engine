@@ -46,6 +46,17 @@ export interface ReviseByQuoteOptions {
   chapterNo: number;
   /** 待修问题。只有带 `detail`（引句）的才可能被定点修 */
   findings: GateFinding[];
+  /**
+   * 作者在收敛过程中投递的指令（B-71）。
+   *
+   * ★与 findings 的区别：findings 是**检查发现的问题**（有引句、可定位）；
+   * 这里是**作者的意图**（"把这段写得更冷"），没有引句，模型得自己找落点。
+   * 所以它们只作为**提示**进 prompt，不做定位校验——引句守卫仍然兜底
+   * （模型编出来的引句会被跳过），不会因此改坏正文。
+   *
+   * 为什么默认没有：steer 是 B-71 才接上的能力，老调用方不该被要求传新参数。
+   */
+  authorInstructions?: string[];
   /** 单次最多接受多少条补丁 */
   maxPatches?: number;
   /** 被替换字符数占全文的比例上限 */
@@ -258,8 +269,14 @@ export async function reviseByQuote(o: ReviseByQuoteOptions): Promise<ReviseByQu
     '# 待修问题（只改这些问题指出的地方）',
     problems,
   ].join('\n');
+  // 作者指令（B-71）：有才加这一段，**不加空标题**——
+  // 空的「作者指令」段会让模型以为漏看了什么，反而诱发改别处
+  const authorBlock = (o.authorInstructions ?? []).filter((x) => x.trim() !== '');
+  const userFinal = authorBlock.length > 0
+    ? `${user}\n\n# 作者指令（收敛途中由作者投递；与本轮发现冲突时**优先执行**，落点由你判断）\n${authorBlock.map((x, i) => `${i + 1}. ${x}`).join('\n')}`
+    : user;
 
-  const bundle = { system, user, ruleRefs: { author: [], plugin: [] } };
+  const bundle = { system, user: userFinal, ruleRefs: { author: [], plugin: [] } };
   const callOpts: CallLLMOptions = { temperature: 0.2, ...o.llm, ...(o.signal !== undefined ? { signal: o.signal } : {}) };
 
   let r = await callLLM(bundle, callOpts);

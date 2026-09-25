@@ -121,6 +121,14 @@ export interface ConvergeOptions {
    * server 侧的无状态 spawn 照样跑完——那正是这条问卷里最容易被误判的一条。
    */
   signal?: AbortSignal;
+  /**
+   * 取作者在收敛途中投递的指令（B-71）。**每轮开始时调用一次**，返回本轮要执行的指令。
+   * 返回空数组 = 没有指令。
+   *
+   * ★为什么是回调而不是数组：指令可能在收敛**中途**才来（那正是 steer 的意义），
+   * 传数组就只能拿到开始时刻的。server 用它读 `/steer` 投进事件流的指令。
+   */
+  steer?: () => string[];
 }
 
 export interface ConvergeRound {
@@ -439,6 +447,8 @@ async function convergeChapterLocked(o: ConvergeOptions): Promise<ConvergeResult
           bookRoot: root,
           chapterNo: o.chapterNo,
           findings: blocking,
+          // B-71：本轮开始时收一次作者指令，带进 revise prompt
+          ...(o.steer !== undefined ? { authorInstructions: o.steer() } : {}),
           ...reviseCfg,
           ...(o.signal !== undefined ? { signal: o.signal } : {}),
           llm: llmOpts,

@@ -356,7 +356,11 @@ const server = createServer(async (req, res) => {
             await assertPlanReady(bookRoot, chapterNo);
             const result = mode === 'write'
               ? await writeChapter({ bookRoot, chapterNo })
-              : await convergeChapter({ bookRoot, chapterNo, signal: task.signal });
+              : await convergeChapter({
+                  bookRoot, chapterNo, signal: task.signal,
+                  // B-71：每轮 revise 开始时收一次 /steer 投进来的指令
+                  steer: () => runs.drainSteer(runId),
+                });
             runs.finish(runId, task.signal.aborted ? 'cancelled' : 'done', { result: result as unknown as Record<string, unknown> });
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
@@ -383,9 +387,12 @@ const server = createServer(async (req, res) => {
         }
         const e = runs.steer(bookRoot, runId, instruction);
         send(res, 200, {
-          delivered: true, consumed: false, eventId: e.id,
-          note: '指令已记入事件流，但**当前收敛循环不消费它**（消费 steer 是后续工作）。'
-            + '它现在的作用是「留痕 + 让人在 /events 里看见」。',
+          delivered: true, eventId: e.id,
+          // ★诚实描述消费时机：不是「投了立即生效」，而是「下一轮 revise 开始时生效」。
+          //   若任务在本轮与下一轮之间结束，这条指令就不会被执行——那不是 bug，
+          //   是「收敛已经结束，没有下一轮」。
+          note: '已进入待执行队列，**下一轮修订开始时生效**（每轮开始时由收敛循环取走）。'
+            + '若收敛在此期间结束，该指令不会被执行——事件流里会出现 steer-consumed 与否，可作为核对依据。',
         });
         return;
       }
