@@ -14,6 +14,7 @@ import { registerRules } from './commands/rules.js';
 import { registerHooks } from './commands/hooks.js';
 import { registerPlan } from './commands/plan.js';
 import { registerJudge } from './commands/judge.js';
+import { registerLock } from './commands/lock.js';
 
 program.name('novel').description('novel-engine 命令行外壳').version('0.0.0');
 
@@ -31,6 +32,7 @@ registerRules(program);
 registerHooks(program);
 registerPlan(program);
 registerJudge(program);
+registerLock(program);
 
 try {
   await program.parseAsync(process.argv);

@@ -6,6 +6,7 @@ import { applyGateResult, BLOCKING_SEVERITIES, isPassingWorst, readState, snapsh
 import { runGates } from './gates.js';
 import { judgeChapter, JudgesNotDeclared, writeJudgeStatus } from './judges.js';
 import { readReviseConfig, reviseByQuote } from './revise.js';
+import { withBookLock } from './lock.js';
 import type { GateFinding, LLMResult } from './types.js';
 
 /** 章节文件名：两位数零填充，与默认 file_regex ^ch-(\d+)\.md$ 对齐（自定义命名规则的书为后续工作） */
@@ -47,6 +48,13 @@ export interface WriteChapterResult {
  * （重建索引，新章 gateStatus 为 null、计数归零，并记 generatedBy 供质量归因）
  */
 export async function writeChapter(o: WriteChapterOptions): Promise<WriteChapterResult> {
+  // 书级锁（B-25）：写章节文件是**唯一**必须独占的动作。
+  // 放在函数内部而不是让各入口接线——接线模式必然漏（B-10 就抓到 novel write 一道门没接）。
+  // convergeChapter 内部会调本函数，同进程重入，不会自己挡自己。
+  return withBookLock(o.bookRoot, `起草第 ${o.chapterNo} 章`, async () => writeChapterLocked(o));
+}
+
+async function writeChapterLocked(o: WriteChapterOptions): Promise<WriteChapterResult> {
   const root = path.resolve(o.bookRoot);
   const bundle = await buildPrompt({ bookRoot: root, chapterNo: o.chapterNo, mode: 'draft' });
   const r = await callLLM(bundle, o.llm);
@@ -246,6 +254,12 @@ function assertStoppedConsistent(
  * LLM 失败：记录错误、break，不吞错误、不静默成功。
  */
 export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResult> {
+  // 整个收敛过程独占本书（B-25）：一轮里要 readState → 改章节 → writeState 两遍，
+  // 与另一个进程交错就会「两边都报成功、后写的覆盖先写的」。
+  return withBookLock(o.bookRoot, `收敛第 ${o.chapterNo} 章`, async () => convergeChapterLocked(o));
+}
+
+async function convergeChapterLocked(o: ConvergeOptions): Promise<ConvergeResult> {
   const root = path.resolve(o.bookRoot);
   const maxLocal = o.maxLocalRounds ?? 2;
   const maxRewrite = o.maxRewriteRounds ?? 1;

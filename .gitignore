@@ -15,3 +15,6 @@ vite.config.ts.timestamp-*.mjs
 
 # Office 临时锁文件（打开 docx/xlsx/pptx 时由 Office 生成，绝不能入仓）
 ~$*
+
+# 书级写锁（运行时产生，不入仓）
+.soloent/lock.json

@@ -290,3 +290,34 @@ test('★B-28：rules candidates / adopt 真的接在 CLI 上，且拒绝未改�
     await rm(path.dirname(root), { recursive: true, force: true });
   }
 });
+
+test('★B-25：novel lock status/release 可用，且与 core 的锁文件同源', async () => {
+  const root = await newBook(['--no-plan']);
+  try {
+    // 没有锁 → 明确说没有，而不是空输出
+    const none = await novel(['lock', 'status', '--book', root]);
+    assert.equal(none.code, 0);
+    assert.equal(json<{ lock: unknown }>(none.stdout).lock, null);
+    assert.match(none.stderr, /当前没有锁/);
+
+    // 手写一把别人的锁 → status 要报出持有者与用途
+    await writeFile(path.join(root, '.soloent', 'lock.json'), JSON.stringify({
+      pid: 999999999, host: 'other', label: 'novel book 第 1-5 章', at: new Date().toISOString(), token: 't',
+    }), 'utf-8');
+    const held = await novel(['lock', 'status', '--book', root]);
+    assert.equal(held.code, 0);
+    const info = json<{ lock: { pid: number; label: string } }>(held.stdout).lock;
+    assert.equal(info.pid, 999999999);
+    assert.equal(info.label, 'novel book 第 1-5 章');
+    assert.match(held.stderr, /novel lock release/, '要给出接管路径');
+
+    // 强制释放
+    const rel = await novel(['lock', 'release', '--book', root]);
+    assert.equal(rel.code, 0);
+    assert.equal(json<{ released: { pid: number } }>(rel.stdout).released.pid, 999999999);
+    assert.match(rel.stderr, /已强制释放/);
+    assert.equal(json<{ lock: unknown }>((await novel(['lock', 'status', '--book', root])).stdout).lock, null);
+  } finally {
+    await rm(path.dirname(root), { recursive: true, force: true });
+  }
+});

@@ -10,6 +10,15 @@ export type { StyleGateReport, RunStyleGateOptions } from './style.js';
 export { readState, writeState, summarizeGateResult, applyGateResult, snapshotChapterHashes, stripConclusions, isPassingWorst, BLOCKING_SEVERITIES, SCHEMA_VERSION } from './state.js';
 export { contentHash } from './hash.js';
 export {
+  acquireBookLock,
+  releaseBookLock,
+  forceReleaseBookLock,
+  readBookLock,
+  withBookLock,
+  BookLockedError,
+} from './lock.js';
+export type { BookLockInfo, BookLockHandle, AcquireOptions } from './lock.js';
+export {
   readBookConfig,
   writeBookConfig,
   bookConfigPath,

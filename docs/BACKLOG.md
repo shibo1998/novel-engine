@@ -121,9 +121,10 @@
 | B-68 | 定点修订改动量上限可配（`book.json` 的 `revise` 段）；非法值回退默认不抛错 | 2026-09-25 · d9607ba |
 | B-69 | `human-needed` 的交接清单落盘 `state/handoff/ch-NN.md`；过闸即删（过期的清单不如没有） | 2026-09-25 · d9607ba |
 | B-61 | 文档写明「`PUT /chapter` 刻意不设闸门」——README 关键边界 + 架构契约决策记录（不写下来日后必被当漏洞「修」） | 2026-09-25 · 0ea2b10 |
+| B-25 | 书级写锁：`{pid, host, label, at, token}`；**陈旧锁可接管**（pid 不在 / 锁龄超 30 分钟）；**同进程可重入**（convergeChapter→writeChapter 不自挡）；release 只认自己的 token。★锁放在 `writeChapter`/`convergeChapter` **内部**而非各入口接线（B-10 的教训）。`novel lock status\|release` | 2026-09-25 · 见下 |
 
 > 随 B-01/B-02 一并修掉的基建缺陷：`packages/core` 的 `test` 脚本是**硬编码文件清单**，
 > 新增的 `test/memory-context.test.ts` 没被登记 → 实际只跑 55 项，B-01/B-02 的 4 项测试
 > 从未执行过。已改为 `"test/**/*.test.ts"`。（此类「测试在但不跑」的坑与 B-15「测试基建」
-> 同类，登记为教训。）当前全量：core 126 + cli 12 = **138 项全绿，0 跳过**
+> 同类，登记为教训。）当前全量：core 137 + cli 13 = **150 项全绿，0 跳过**
 > （另含 gates 检查器的 9 项 Python 固件，经 `gates-python.test.ts` 一并跑）。
