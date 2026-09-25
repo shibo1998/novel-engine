@@ -237,7 +237,6 @@ python tools/preflight.py     # 退出码 0 才许写下一章
 | 大纲 | `three-layer-outline` / `world-building` / `character-design` |
 | 卡文 / 审查 / 润色 | `brainstorming` / `chapter-review` / `prose-polishing` |
 | 发布 / 诊断 | `fanqie-publish-assistant` / `publishing-diagnosis` |
-| 角色沙盘 | `oc-kosmos` / `oc-kaleidos` |
 
 ## 7. 工具与归档
 

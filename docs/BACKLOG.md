@@ -103,7 +103,7 @@
 | B-69 | `human-needed` 的交接清单落盘 `state/handoff/ch-NN.md`；过闸即删（过期的清单不如没有） | 2026-09-25 · d9607ba |
 | B-61 | 文档写明「`PUT /chapter` 刻意不设闸门」——README 关键边界 + 架构契约决策记录（不写下来日后必被当漏洞「修」） | 2026-09-25 · 0ea2b10 |
 | B-56 | legacy 手册归档到 `docs/legacy/`（`docs/legacy-README.md` → `docs/legacy/README.md`，同 SKILL） | 2026-09-25 · 见下 |
-| B-55 | `content/` 清理**清单**已出（`docs/28-content清理清单.md`）：建议删 `oc-kaleidos`+`oc-kosmos`（642K）+`weekly-meme-report`（44K）；`wuhang-*` 列出但**不建议删**（与 `plan`/`write` 功能重叠属 B-54）。★**未删任何文件，等作者确认** | 2026-09-25 · 见下 |
+| B-55 | **已执行（作者确认）**：删 oc-kaleidos+oc-kosmos+weekly-meme-report（87 文件 / 686K），AGENTS.template.md 同步；备份在 D:/tmp/novel-content-backup，git 历史可恢复。清单见 docs/28（原判定依据保留）。原记录：`content/` 清理**清单**已出（`docs/28-content清理清单.md`）：建议删 `oc-kaleidos`+`oc-kosmos`（642K）+`weekly-meme-report`（44K）；`wuhang-*` 列出但**不建议删**（与 `plan`/`write` 功能重叠属 B-54）。★**未删任何文件，等作者确认** | 2026-09-25 · 见下 |
 | B-44 | Server 长任务：`POST /run` **立即返回 202 `{runId}`**，后台跑；`GET /events` **SSE** 支持 `Last-Event-ID` 补发，补不到时发 `event: gap`（**不带 id**，不污染续传位置）；`POST /edit` 统一写入口，**拒写 gateStatus/needsReview/contentHash**；`POST /steer` 投递指令但**明说 consumed: false**（收敛循环当前不消费它 → 后续项 B-71）
 | B-31 | 评测集与度量仪器 `novel eval`：`<书根>/evals/<用例名>/`（`chapter.md` + `outline.md` + `expect.json{verdict,criterion,note}`）；跑完报**检出率**（分母=fail 用例）、**假红率**（分母=pass 用例）、unsure 占比。★`unsure` **既不算检出也不算放过**；★用例数为 0 时是 `null` 不是 0；★**在临时目录造书跑，不碰真书的 chapters/state/gateStatus**；★缺文件/verdict 非法**一律报错不静默跳过**（静默跳过会让分母悄悄变小） | 2026-09-25 · 见下 |
 | B-43 | Arbiter 四类封闭裁定（`pick-strategy`/`blast-radius`/`escape-route`/`assign-payoff`）：★**候选集由 Engine 给全**，选到集外判**无效**；★**默认交人**（不开 auto 连模型都不调）；★**自洽采样 3 次**不一致即交人（不用模型自报置信度——那是没校准的数字）；★**只选不写**（记录里无正文字段）；落 `state/decisions/d-XXXX.json` | 2026-09-25 · 见下 |
