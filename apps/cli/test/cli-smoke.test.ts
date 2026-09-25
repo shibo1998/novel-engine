@@ -376,13 +376,14 @@ test('★B-20：novel extract 的 --status / --rollback 可用；没抽过时明
     assert.equal(s1.dropped, 2, '★丢弃数要能被看到——「抽出来了」不等于「抽对了」');
     assert.match(st1.stderr, /丢弃 2 条/);
 
-    // 查某人截至第 N 章的状态
-    const ch = await novel(['extract', '--book', root, '--character', '林青', '--chapter', '1']);
+    // 查某人 → 走 novel lookup（B-22 把「反查」独立出去了；
+    // 一个答案只留一个入口，不让 extract 和 lookup 各查一遍）
+    const ch = await novel(['lookup', 'character', '--book', root, '--name', '林青']);
     assert.equal(ch.code, 0);
-    assert.equal(json<{ state: { state: { realm: string } } }>(ch.stdout).state.state.realm, '炼气');
+    assert.deepEqual(json<{ appearances: number[] }>(ch.stdout).appearances, [1]);
     // 查不存在的人 → 明说没有，并列出已记录的人
-    const miss = await novel(['extract', '--book', root, '--character', '查无此人', '--chapter', '1']);
-    assert.equal(json<{ state: unknown }>(miss.stdout).state, null);
+    const miss = await novel(['lookup', 'character', '--book', root, '--name', '查无此人']);
+    assert.equal(json<{ history: unknown[] }>(miss.stdout).history.length, 0);
     assert.match(miss.stderr, /已记录的出场人物：林青/);
 
     // 撤回
@@ -390,6 +391,49 @@ test('★B-20：novel extract 的 --status / --rollback 可用；没抽过时明
     assert.equal(rb.code, 0);
     assert.equal(json<{ rolledBack: boolean }>(rb.stdout).rolledBack, true);
     assert.equal(json<{ extractedChapters: number }>((await novel(['extract', '--book', root, '--status'])).stdout).extractedChapters, 0);
+  } finally {
+    await rm(path.dirname(root), { recursive: true, force: true });
+  }
+});
+
+test('★B-22/B-23：novel foreshadow / lookup 接在 CLI 上，空库时都明说「没有」', async () => {
+  const root = await newBook(['--no-plan']);
+  try {
+    await writeFile(path.join(root, 'chapters', 'ch-01.md'), '# 第1章 冒烟\n\n他推开门。\n', 'utf-8');
+    await novel(['state', '--book', root, '--rebuild']);
+
+    // 台账空 → 明确指引
+    const l0 = await novel(['foreshadow', 'list', '--book', root]);
+    assert.equal(l0.code, 0);
+    assert.equal(json<{ items: unknown[] }>(l0.stdout).items.length, 0);
+    assert.match(l0.stderr, /台账是空的/);
+
+    // sync（没有事实库 → 0 新增，不该崩）
+    const sync = await novel(['foreshadow', 'sync', '--book', root]);
+    assert.equal(sync.code, 0, `sync 应成功：\n${sync.stderr}`);
+    assert.equal(json<{ added: unknown[] }>(sync.stdout).added.length, 0);
+
+    // lookup 查无此人 → 明说没有 + 报覆盖率
+    const ch = await novel(['lookup', 'character', '--book', root, '--name', '林青']);
+    assert.equal(ch.code, 0);
+    assert.equal(json<{ history: unknown[] }>(ch.stdout).history.length, 0);
+    assert.match(ch.stderr, /没有「林青」的记录/);
+    assert.match(ch.stderr, /抽取覆盖率：0\/1 章/);
+
+    // timeline 空 → 明说「没抽过的章不在这里」
+    const tl = await novel(['lookup', 'timeline', '--book', root]);
+    assert.equal(json<{ events: unknown[] }>(tl.stdout).events.length, 0);
+    assert.match(tl.stderr, /没抽过的章不在这里/);
+
+    // conflicts 空 → 明说「只说明抽出来的事实不打架」
+    const cf = await novel(['lookup', 'conflicts', '--book', root]);
+    assert.equal(json<{ hints: unknown[] }>(cf.stdout).hints.length, 0);
+    assert.match(cf.stderr, /不说明正文没矛盾/);
+
+    // set 未知 id → 退出码 2，并列出候选
+    const bad = await novel(['foreshadow', 'set', '--book', root, '--id', 'f-999', '--level', 'core']);
+    assert.equal(bad.code, 2);
+    assert.match(bad.stderr, /没有伏笔 f-999/);
   } finally {
     await rm(path.dirname(root), { recursive: true, force: true });
   }

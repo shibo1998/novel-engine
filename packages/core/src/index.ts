@@ -48,6 +48,30 @@ export {
   characterStateUpTo,
   evidenceFound as factEvidenceFound,
 } from './extract.js';
+export {
+  syncForeshadows,
+  readForeshadowLedger,
+  updateForeshadow,
+  summarizeForeshadows,
+  allocForeshadowId,
+  ForeshadowError,
+} from './foreshadow.js';
+export type {
+  ForeshadowItem,
+  ForeshadowLedger,
+  ForeshadowLevel,
+  ForeshadowStatus,
+  ForeshadowReport,
+  SyncResult,
+} from './foreshadow.js';
+export {
+  lookupCharacter,
+  lookupTimeline,
+  characterHistory,
+  listKnownCharacters,
+  findFactConflicts,
+} from './lookup.js';
+export type { CharacterLookup, CharacterAppearance, TimelineLookup, ConflictHint } from './lookup.js';
 export type {
   ChapterFacts,
   FactsStore,

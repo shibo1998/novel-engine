@@ -1,12 +1,6 @@
 import path from 'node:path';
 import type { Command } from 'commander';
-import {
-  characterStateUpTo,
-  extractChapter,
-  readFacts,
-  readState,
-  rollbackChapterFacts,
-} from '@novel/core';
+import { extractChapter, readFacts, readState, rollbackChapterFacts } from '@novel/core';
 
 /**
  * novel extract：每章抽事实（B-20 / v0.2 M5）。
@@ -29,7 +23,6 @@ export function registerExtract(program: Command): void {
     .option('--to <n>', '批量：结束章号（含）', (v: string) => Number.parseInt(v, 10))
     .option('--rollback <n>', '撤回某一章的事实（不重抽；改设定后常要先撤回再批量重抽）', (v: string) => Number.parseInt(v, 10))
     .option('--status', '只读：看已抽了哪些章、丢弃了多少条', false)
-    .option('--character <name>', '查某人「截至 --chapter 为止」的状态')
     .action(async (opts: {
       book: string;
       chapter?: number;
@@ -37,7 +30,6 @@ export function registerExtract(program: Command): void {
       to?: number;
       rollback?: number;
       status: boolean;
-      character?: string;
     }) => {
       const root = path.resolve(opts.book);
 
@@ -54,29 +46,8 @@ export function registerExtract(program: Command): void {
         return;
       }
 
-      if (opts.status || opts.character !== undefined) {
+      if (opts.status) {
         const [store, state] = await Promise.all([readFacts(root), readState({ bookRoot: root })]);
-        if (opts.character !== undefined) {
-          const upto = opts.chapter ?? Math.max(0, ...state.chapters.map((c) => c.chapterNo));
-          const all = characterStateUpTo(store, upto, state.chapters);
-          const hit = all.get(opts.character) ?? null;
-          process.stdout.write(JSON.stringify({ character: opts.character, upTo: upto, state: hit ?? null }) + '\n');
-          if (hit === null) {
-            process.stderr.write(
-              `截至第 ${upto} 章没有「${opts.character}」的状态记录。\n`
-                + `  已记录的出场人物：${[...all.keys()].join('、') || '（空）'}\n`
-                + '  注意：只有**抽过**的章才会出现在这里——没抽过的章不参与。\n',
-            );
-          } else {
-            process.stderr.write(
-              `「${opts.character}」截至第 ${hit.atChapter} 章（最近一次出现在第 ${hit.atChapter} 章）：\n`
-                + `  境界 ${hit.state.realm || '(未写)'}｜位置 ${hit.state.location || '(未写)'}｜`
-                + `${hit.state.alive ? '在世' : '已死亡'}\n`
-                + `  变化原因：${hit.cause || '(未写)'}\n`,
-            );
-          }
-          return;
-        }
         const entries = Object.entries(store.chapters);
         process.stdout.write(JSON.stringify({
           bookRoot: root,
@@ -100,7 +71,10 @@ export function registerExtract(program: Command): void {
               + '\n',
           );
         }
-        process.stderr.write(`共 ${entries.length}/${state.chapters.length} 章已抽。\n`);
+        process.stderr.write(
+          `共 ${entries.length}/${state.chapters.length} 章已抽。\n`
+            + '  反查：novel lookup character --name <名>｜novel lookup timeline｜novel foreshadow list\n',
+        );
         return;
       }
 
