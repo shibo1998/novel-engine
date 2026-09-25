@@ -44,3 +44,32 @@ export {
   PlanLayerError,
 } from './plan.js';
 export type { LayerKind, LayerStatus, LayerReport, LayerConfirm, PlanFile, PlanVolume, PlanGateReport } from './plan.js';
+export {
+  DEFAULT_JUDGE_DEFS,
+  JudgeDefMissing,
+  JudgesNotDeclared,
+  judgeFile,
+  readJudgeDecl,
+  loadJudges,
+  scaffoldJudges,
+  evidenceFound,
+  evaluateCriteria,
+  parseJudgeOutput,
+  judgeChapter,
+  writeJudgeStatus,
+  readJudgeStatus,
+} from './judges.js';
+export type {
+  JudgeVerdict,
+  JudgeEvidence,
+  JudgeCriterionResult,
+  JudgeDef,
+  LoadedJudge,
+  JudgeResult,
+  JudgeChapterOptions,
+  JudgeChapterStatus,
+  JudgeStore,
+  ParsedJudgeItem,
+  EvaluateInput,
+  EvaluateOutput,
+} from './judges.js';

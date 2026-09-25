@@ -13,6 +13,7 @@ import { registerSummarize } from './commands/summarize.js';
 import { registerRules } from './commands/rules.js';
 import { registerHooks } from './commands/hooks.js';
 import { registerPlan } from './commands/plan.js';
+import { registerJudge } from './commands/judge.js';
 
 program.name('novel').description('novel-engine 命令行外壳').version('0.0.0');
 
@@ -29,6 +30,7 @@ registerSummarize(program);
 registerRules(program);
 registerHooks(program);
 registerPlan(program);
+registerJudge(program);
 
 try {
   await program.parseAsync(process.argv);
