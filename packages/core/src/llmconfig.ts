@@ -145,3 +145,12 @@ export function resolveModelFor(purpose: LlmPurpose, explicit?: string): string 
   }
   return resolveLlmSetting('LLM_MODEL') ?? '';
 }
+
+/** 从配置文件读一个正数（不存在/非法 → undefined）。供 `timeoutMs` 这类数值项用 */
+export function configNumber(key: string): number | undefined {
+  const cfg = readConfig();
+  if (cfg === null) return undefined;
+  const v = (cfg as unknown as Record<string, unknown>)[key];
+  const n = typeof v === 'number' ? v : (typeof v === 'string' ? Number(v) : NaN);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}

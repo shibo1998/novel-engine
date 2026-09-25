@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { contentHash } from './hash.js';
 import type { LLMError, LLMResult, PromptBundle } from './types.js';
-import { resolveLlmSetting, resolveModelFor } from './llmconfig.js';
+import { configNumber, resolveLlmSetting, resolveModelFor } from './llmconfig.js';
 
 export interface CallLLMOptions {
   temperature?: number;
@@ -43,7 +43,10 @@ export function modelFor(purpose: LlmPurpose, explicit?: string): string {
  */
 const TIMEOUT_MS = (() => {
   const raw = Number(process.env['NOVEL_LLM_TIMEOUT_MS'] ?? '');
-  return Number.isFinite(raw) && raw > 0 ? raw : 120_000;
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  // 配置文件也认（作者可能不想用 env）：`timeoutMs`，毫秒
+  const fromFile = configNumber('timeoutMs');
+  return fromFile !== undefined ? fromFile : 120_000;
 })();
 const RETRY_DELAY_MS = 1_000;
 
