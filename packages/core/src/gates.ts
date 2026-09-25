@@ -145,6 +145,63 @@ function shapeError(field: string, raw: string): Error {
   return new GateFailureError('shape', `gate 输出 shape 不符：字段 ${field}；stdout 前 200 字符：${raw.slice(0, 200)}`);
 }
 
+export interface GateErrorPayload {
+  kind: string;
+  detail: string;
+  problems: string[];
+}
+
+/**
+ * 从检查器非 0 退出的 stdout 里抠**结构化原因**（B-14 契约，见 gates/kit.py）。
+ * 拿不到就返回 null——契约外的失败，不猜语义，上层退回通用的 'exit'。
+ */
+export function parseGateError(stdout: string): GateErrorPayload | null {
+  const trimmed = stdout.trim();
+  if (trimmed === '') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  const err = (parsed as { error?: unknown } | null)?.error;
+  if (typeof err !== 'object' || err === null) return null;
+  const e = err as Record<string, unknown>;
+  if (typeof e['kind'] !== 'string') return null;
+  return {
+    kind: e['kind'],
+    detail: typeof e['detail'] === 'string' ? e['detail'] : '',
+    problems: Array.isArray(e['problems']) ? e['problems'].filter((p): p is string => typeof p === 'string') : [],
+  };
+}
+
+/**
+ * 非 0 退出时，stdout 里**不该**有完整的 GateResult。
+ *
+ * 为什么必须显式挡：真有这种情况，说明检查器一边报「没跑成」一边又吐了 findings——
+ * 上层无论选哪边都是在猜。更要命的是「静默丢掉 findings」= 「查了没问题」同形，
+ * 正是本项目反复在治的形态。所以宁可当场报契约违规，也不挑一个语义活下去。
+ */
+export function assertNoResultOnFailure(stdout: string): void {
+  const trimmed = stdout.trim();
+  if (trimmed === '') return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return;
+  }
+  const v = parsed as Record<string, unknown>;
+  if (Array.isArray(v['findings']) && typeof v['chapter_count'] === 'number') {
+    throw new GateFailureError(
+      'shape',
+      'gate 契约违规：非 0 退出，但 stdout 里有完整的 GateResult（含 findings + chapter_count）。\n'
+        + '  退出码说「没跑成」、stdout 说「跑成了」——两边矛盾，拒绝挑一个活下去。\n'
+        + '  正确契约：结论只在 exit 0 时有效（B-14）。请修检查器，不要改这里的判据。',
+    );
+  }
+}
+
 function assertGateResult(value: unknown, raw: string): GateResult {
   if (typeof value !== 'object' || value === null) throw shapeError('(root)', raw);
   const v = value as Record<string, unknown>;
@@ -233,11 +290,25 @@ export async function runGates(opts: RunGatesOptions): Promise<GateResult> {
   }
 
   const { code, stdout, stderr } = collected;
-  // 语义钉注：检查器「发现问题也返回 0」，非 0（exit 2）才是执行失败
+  // ── 退出码契约（B-14，与 gates/kit.py 的 EXIT_* 一一对应）─────────────────
+  //   0 = 正常跑完 → **结论只看 stdout 的 JSON**（findings 几条与退出码无关）
+  //   非 0 = 本次**没有产出可用结论**（崩溃 / 环境错）。一律当失败处理，
+  //          绝不允许读成「查了没问题」——那是本项目反复在治的假绿形态。
+  // 非 0 时检查器会在 stdout 吐一份**结构化原因**（`{ok:false, error:{kind}}`），
+  // 据此把失败分成 'config'（作者去改 book.json）与 'crash'（报 bug）。
+  // 拿不到结构化原因就退回通用的 'exit'——契约外的失败，不猜语义。
   if (code !== 0) {
+    assertNoResultOnFailure(stdout);
+    const detail = parseGateError(stdout);
+    const kind: GateFailureKind = detail?.kind === 'config' ? 'config'
+      : detail?.kind === 'crash' ? 'crash'
+        : 'exit';
+    const problems = detail?.problems ?? [];
     throw new GateFailureError(
-      'exit',
-      `gate 执行失败（exit ${code ?? 'signal'}）：\n    ${headLines(stderr) || '(stderr 无内容)'}`,
+      kind,
+      `gate 执行失败（exit ${code ?? 'signal'}｜${kind}）：${detail?.detail ?? ''}\n`
+        + (problems.length > 0 ? problems.map((p) => `    - ${p}`).join('\n') + '\n' : '')
+        + `    stderr：\n    ${headLines(stderr) || '(stderr 无内容)'}`,
     );
   }
 

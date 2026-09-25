@@ -99,7 +99,9 @@ export type LLMError =
 export type GateFailureKind =
   | 'timeout'          // 子进程超时被 SIGKILL
   | 'spawn'            // 脚本不存在 / 进程根本没起来
-  | 'exit'             // 非 0 退出
+  | 'exit'             // 非 0 退出，且没能从 stdout 解析出结构化原因（契约外的失败）
+  | 'config'           // 环境/配置错（B-14）：书配置缺失/读不了/结构非法。脚本没崩，但没法判
+  | 'crash'            // 检查器内部崩溃（B-14）：未捕获异常
   | 'parse'            // stdout 不是合法 JSON
   | 'shape'            // JSON 结构不符契约
   | 'root'             // bookRoot 不是目录

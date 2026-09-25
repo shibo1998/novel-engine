@@ -1049,4 +1049,6 @@ def main():
 
 if __name__ == "__main__":
     kit.force_utf8()
-    sys.exit(main())
+    # 统一入口（B-14）：未捕获异常 → EXIT_CRASH(1) + stdout 结构化原因；
+    # 正常返回 → EXIT_OK(0)。**退出码只表示脚本有没有跑完，结论只看 stdout 的 JSON。**
+    kit.run_main(main)

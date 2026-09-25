@@ -3,7 +3,7 @@ export { buildPrompt, loadRules, auditRules, RuleFileMissing } from './prompt.js
 export type { RuleAudit } from './prompt.js';
 export { callLLM, isRetryable, llmBreakerState, resetLlmBreaker } from './llm.js';
 export type { CallLLMOptions } from './llm.js';
-export { runGates, GateFailureError } from './gates.js';
+export { runGates, GateFailureError, parseGateError, assertNoResultOnFailure } from './gates.js';
 export type { RunGatesOptions } from './gates.js';
 export { runStyleGate, assertStyleReady, StyleNotReadyError, STYLE_GATE } from './style.js';
 export type { StyleGateReport, RunStyleGateOptions } from './style.js';

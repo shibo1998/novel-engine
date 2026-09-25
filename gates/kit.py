@@ -29,6 +29,72 @@ def _ep(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
 
+# ── gates 退出码契约（2026-09-25 统一，B-14）───────────────────────────────
+#
+#   0 = 正常跑完。**结论只看 stdout 的 JSON**——findings 有几条、严重度如何，
+#       与退出码**毫无关系**。发现问题也是 0。
+#   1 = 脚本崩了（未捕获异常）。本次**没有结论**。
+#   2 = 环境/配置错（书配置缺失、读不了、结构非法）。本次**没有结论**。
+#
+# ★非 0 的含义只有一个：**本次没产出可用结论**。上层一律当失败处理，
+#   绝不允许把非 0 读成「查了没问题」——那是本项目反复在治的假绿形态。
+#
+# 为什么非 0 也要往 stdout 吐 JSON：上层要能按 kind 分流
+# （配置错 → 作者去改 book.json；崩溃 → 报 bug）。只给 stderr 的话，
+# 上层只能拿到一坨文本，分不出这两件事，最后只能统一报「gate 执行失败」。
+EXIT_OK = 0
+EXIT_CRASH = 1
+EXIT_CONFIG = 2
+
+
+def gate_name():
+    """当前检查器名（取 argv[0] 的文件名）——用于结构化错误里的 gate 字段。"""
+    return os.path.splitext(os.path.basename(sys.argv[0] or "gate"))[0]
+
+
+def emit_error(kind, detail, book_root=None, problems=None):
+    """把失败原因以**结构化**形式吐到 stdout。
+
+    ⚠️ 这份 JSON **不是结论**：它没有 findings、没有 chapter_count。
+    上层的形状校验会（也应该）拒绝把它当 GateResult 用。
+    """
+    err = {"kind": kind, "detail": detail}
+    if problems:
+        err["problems"] = list(problems)
+    print(json.dumps({
+        "gate": gate_name(),
+        "book_root": book_root,
+        "ok": False,
+        "error": err,
+    }, ensure_ascii=False))
+
+
+def fail_config(detail, book_root=None, problems=None):
+    """环境/配置错：结构化原因走 stdout，人类可读细节走 stderr，然后 exit 2。"""
+    emit_error("config", detail, book_root, problems)
+    sys.exit(EXIT_CONFIG)
+
+
+def run_main(fn):
+    """检查器统一入口：包住 main()，把未捕获异常变成 EXIT_CRASH + 结构化原因。
+
+    没有这层包装，未捕获异常就是 Python 默认的 traceback + exit 1：
+    stdout 一个字符都没有，上层只能拿到退出码和 stderr 里的一坨文本，
+    既分不出「崩了」与「配置错」，也没法做任何程序化处理。
+    """
+    try:
+        code = fn()
+    except SystemExit:
+        raise
+    except BaseException as e:  # noqa: BLE001 —— 入口层要兜住一切，包括 KeyboardInterrupt 之外的 BaseException
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        _ep(f"⛔ 检查器崩溃：{type(e).__name__}: {e}")
+        emit_error("crash", f"{type(e).__name__}: {e}")
+        sys.exit(EXIT_CRASH)
+    sys.exit(EXIT_OK if code is None else int(code))
+
+
 KIT_ROOT = os.path.dirname(os.path.abspath(__file__))      # 本目录 = scripts/
 PLUGIN_ROOT = os.path.dirname(KIT_ROOT)                    # 插件根
 # 支撑目录沿用 SoloEnt 官方约定：templates / docs / scripts（+ assets 放打包进来的库）
@@ -480,7 +546,7 @@ def load_book(argv=None, required=True):
             _ep("   新书初始化：novel init --dir <书目录> --title <书名> "
                   "[--genre <题材>] [--platform <平台>]")
             _ep("   （该命令会一并生成 .soloent/book.json 与三份待填的风格/红线文件）")
-            sys.exit(2)
+            fail_config("找不到书配置：从当前目录逐级向上都没有 .soloent/book.json")
         return None
     p = os.path.join(root, CONFIG_REL)
     try:
@@ -488,7 +554,7 @@ def load_book(argv=None, required=True):
             cfg = json.load(f)
     except (OSError, ValueError) as e:
         _ep(f"⛔ 配置读不了：{p}\n   {e}")
-        sys.exit(2)
+        fail_config(f"配置读不了：{p}", root, [str(e)])
     # 结构校验失败一律拒绝（失败关闭）。以前只对 _schema 打警告继续跑——
     # 拼错列名 / 缺路径会让工具在深水区才炸，或静默检查错对象。
     problems = config_problems(cfg)
@@ -498,7 +564,7 @@ def load_book(argv=None, required=True):
             _ep("   - " + pr)
         _ep("   修复：python <插件>/scripts/migrate_config.py --root \"" + root + "\"")
         if required:
-            sys.exit(2)
+            fail_config(f"配置结构校验未通过：{p}", root, problems)
         return None
     return Book(root, cfg)
 
