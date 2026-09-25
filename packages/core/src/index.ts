@@ -11,6 +11,8 @@ export { readState, writeState, summarizeGateResult, applyGateResult, snapshotCh
 export type { ReadStateOptions, ApplyGateResultOptions } from './state.js';
 export { writeChapter, saveChapterText, convergeChapter } from './generate.js';
 export type { WriteChapterOptions, WriteChapterResult, ConvergeOptions, ConvergeResult, ConvergeRound } from './generate.js';
+export { reviseByQuote, applyPatches, locateQuote } from './revise.js';
+export type { QuotePatch, SkippedPatch, ReviseByQuoteResult, ReviseByQuoteOptions } from './revise.js';
 export { readSummaries, assembleLongContext, updateChapterSummary, proposeStateCard, CONTEXT_CHAR_CAP } from './summaries.js';
 export type { ChapterSummary, SummaryStore, LongContext } from './summaries.js';
 export { checkChapterReadiness, extractChapterSection, enclosingStageHeading, declaredOutlinePath, OUTLINE_CHAR_CAP } from './readiness.js';

@@ -1,0 +1,106 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { applyPatches, locateQuote } from '../src/index.js';
+import type { QuotePatch } from '../src/index.js';
+
+// B-12 定点修订：按 quote 局部重写。核心是三条守卫——
+// 引句定位不到就跳过、空替换跳过、改动量超限整批放弃。
+
+const TEXT = '林青推开门，山风灌进来。\n他知道事情没那么简单。\n他握紧了那枚玉简。\n';
+
+const p = (quote: string, replacement: string, reason = 'r'): QuotePatch => ({ quote, replacement, reason });
+
+// ── locateQuote ───────────────────────────────────────────────────────────
+
+test('locateQuote：逐字命中给出真实区间；去空白回映射也能定位', () => {
+  const span = locateQuote(TEXT, '他握紧了那枚玉简。');
+  assert.notEqual(span, null);
+  assert.equal(TEXT.slice(span!.start, span!.end), '他握紧了那枚玉简。');
+
+  // 模型复述时改了换行/缩进 → 去空白后仍能定位，且返回的是**正文里的真实区间**
+  const wrapped = locateQuote(TEXT, '他知道事情\n  没那么简单。');
+  assert.notEqual(wrapped, null);
+  assert.equal(TEXT.slice(wrapped!.start, wrapped!.end), '他知道事情没那么简单。');
+
+  assert.equal(locateQuote(TEXT, '他拔剑斩向长老。'), null, '不存在的句子必须定位失败');
+  assert.equal(locateQuote(TEXT, '   '), null, '空引句');
+});
+
+// ── applyPatches 的三条守卫 ───────────────────────────────────────────────
+
+test('applyPatches：命中即替换，未命中的原句一个字符都不动', () => {
+  const r = applyPatches(TEXT, [p('他知道事情没那么简单。', '他盯着门缝里那点光。')]);
+  assert.equal(r.applied.length, 1);
+  assert.equal(r.skipped.length, 0);
+  assert.equal(r.rejected, null);
+  assert.ok(r.text.includes('他盯着门缝里那点光。'));
+  assert.ok(!r.text.includes('他知道事情没那么简单'));
+  assert.ok(r.text.includes('林青推开门，山风灌进来。'), '未被指出的段落保持原样');
+  assert.ok(r.text.includes('他握紧了那枚玉简。'));
+});
+
+test('★守卫 1：引句定位不到 → 跳过并报出原因，正文不变（防幻觉）', () => {
+  const r = applyPatches(TEXT, [p('他拔剑斩向血刀门长老。', '改成别的。')]);
+  assert.equal(r.applied.length, 0);
+  assert.equal(r.skipped.length, 1);
+  assert.match(r.skipped[0]?.why ?? '', /未能在正文中定位/);
+  assert.equal(r.text, TEXT, '没有可应用的补丁时正文必须原样返回');
+});
+
+test('★守卫 2：替换文本为空 → 跳过（静默删正文不可逆，交人工）', () => {
+  const r = applyPatches(TEXT, [p('他知道事情没那么简单。', '   ')]);
+  assert.equal(r.applied.length, 0);
+  assert.match(r.skipped[0]?.why ?? '', /替换文本为空/);
+  assert.equal(r.text, TEXT);
+});
+
+test('★守卫 3：补丁条数超上限 → 整批放弃并说明（那已是重写而非定点修订）', () => {
+  const many = Array.from({ length: 5 }, (_, i) => p('他握紧了那枚玉简。', `第${i}版。`));
+  const r = applyPatches(TEXT, many, { maxPatches: 3 });
+  assert.equal(r.applied.length, 0);
+  assert.equal(r.text, TEXT);
+  assert.match(r.rejected ?? '', /超过单次上限 3/);
+});
+
+test('★守卫 3：改动字符占比超上限 → 整批放弃', () => {
+  // 一次替换掉全文 90% 的字符
+  const r = applyPatches(TEXT, [p(TEXT.trim(), '一句话。')], { maxReplacedRatio: 0.5 });
+  assert.equal(r.applied.length, 0);
+  assert.equal(r.text, TEXT);
+  assert.match(r.rejected ?? '', /超过上限 50%/);
+});
+
+test('区间重叠的补丁只保留先出现的那条，另一条记为跳过', () => {
+  const r = applyPatches(TEXT, [
+    p('他知道事情没那么简单。', 'A。'),
+    p('没那么简单', 'B'),
+  ]);
+  assert.equal(r.applied.length, 1);
+  assert.equal(r.applied[0]?.replacement, 'A。');
+  assert.match(r.skipped[0]?.why ?? '', /重叠/);
+});
+
+test('多条不重叠的补丁按偏移从后往前应用，互不破坏', () => {
+  // 用接近真实章节长度的正文：默认的「改动量 ≤50%」守卫在短文本上会误伤
+  // （两条各 10 字的补丁在 35 字正文里就是 57%——那确实是重写而非定点）
+  const long = [
+    '林青推开门，山风灌进来，吹得窗纸哗哗响。',
+    '院子里那棵老槐树落了一地叶子。',
+    '他知道事情没那么简单。',
+    '远处传来打更的声音，一下，两下。',
+    '他握紧了那枚玉简。',
+    '灶上的水开了，白汽一股股往上冒。',
+  ].join('\n') + '\n';
+
+  const r = applyPatches(long, [
+    p('他知道事情没那么简单。', '他盯着门缝里那点光。'),
+    p('他握紧了那枚玉简。', '他把玉简按进掌心。'),
+  ]);
+  assert.equal(r.rejected, null, `不该被改动量守卫拦下：${r.rejected ?? ''}`);
+  assert.equal(r.applied.length, 2);
+  assert.equal(r.skipped.length, 0);
+  assert.ok(r.text.includes('他盯着门缝里那点光。'));
+  assert.ok(r.text.includes('他把玉简按进掌心。'));
+  assert.ok(r.text.includes('院子里那棵老槐树落了一地叶子。'), '未被指出的段落保持原样');
+  assert.ok(r.text.includes('灶上的水开了，白汽一股股往上冒。'));
+});

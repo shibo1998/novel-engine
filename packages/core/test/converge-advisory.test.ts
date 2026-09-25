@@ -108,7 +108,7 @@ test('converge：draft_free 下只剩提示级 → clean-advisory，且不为提
   }
 });
 
-test('converge：非 draft_free 下同样的正文是拦截级 → 烧满改写轮后 max-rounds', { skip }, async () => {
+test('converge：非 draft_free 下同样的正文是拦截级 → 两阶段都用完 → human-needed（停下等人）', { skip }, async () => {
   const root = await makeBook(false);
   const [base, count, close] = await fakeLLM();
   const saved = { ...process.env };
@@ -117,14 +117,64 @@ test('converge：非 draft_free 下同样的正文是拦截级 → 烧满改写�
       LLM_BASE_URL: base, LLM_API_KEY: 'k', LLM_MODEL: 'm', NOVEL_LLM_RETRY_ATTEMPTS: '0',
     });
     resetLlmBreaker();
-    const r = await convergeChapter({ bookRoot: root, chapterNo: 1, maxRounds: 3 });
-    assert.equal(r.stopped, 'max-rounds');
+    // maxLocalRounds=0 把定点修订整段跳过，单独测整章重写那条路（本用例的假 LLM
+    // 恒定返回同一段正文，定点修订对它没有意义）
+    const r = await convergeChapter({ bookRoot: root, chapterNo: 1, maxLocalRounds: 0, maxRewriteRounds: 3 });
+    assert.equal(r.stopped, 'human-needed', '机器改不动 → 停下等人，不再是含混的 max-rounds');
+    assert.ok((r.handoff?.findings.length ?? 0) > 0, '必须给出交接清单');
     assert.equal(isPassingWorst(r.finalWorst), false, '拦截级未清空 → 批量跑必须据此停下');
-    assert.equal(r.llmCalls, 3, '3 轮改写各一次请求');
+    assert.equal(r.llmCalls, 3, '3 轮整章重写各一次请求');
     assert.equal(count(), 3);
+    assert.equal(r.rounds.at(-1)?.action, 'stop-human-needed');
   } finally {
     Object.assign(process.env, saved);
     close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('★converge：定点修订先于整章重写——按 quote 只改那一句，其余一字不动（B-12）', { skip }, async () => {
+  const root = await makeBook(false);
+  const saved = { ...process.env };
+  let patched = '';
+  // 假 LLM：回一条**引句真实存在**的补丁，把「他知道」那句改掉
+  const srv = createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            patches: [{
+              quote: '他知道事情没那么简单。',
+              replacement: '他盯着门缝里那点光，指节发白。',
+              reason: '去掉裁判腔，用行为暴露想法',
+            }],
+          }),
+        },
+      }],
+    }));
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+  const addr = srv.address();
+  const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
+  try {
+    Object.assign(process.env, {
+      LLM_BASE_URL: `http://127.0.0.1:${port}`, LLM_API_KEY: 'k', LLM_MODEL: 'm', NOVEL_LLM_RETRY_ATTEMPTS: '0',
+    });
+    resetLlmBreaker();
+    const r = await convergeChapter({ bookRoot: root, chapterNo: 1, maxLocalRounds: 1, maxRewriteRounds: 0 });
+    const first = r.rounds[0];
+    assert.equal(first?.phase, 'local', '第一轮必须是定点修订，不是整章重写');
+    assert.equal(first?.action, 'local-revise');
+    assert.equal(first?.patches?.applied, 1, '引句命中 → 应真的替换掉');
+    const { readFile } = await import('node:fs/promises');
+    patched = await readFile(path.join(root, 'chapters', 'ch-01.md'), 'utf-8');
+    assert.ok(patched.includes('他盯着门缝里那点光'), '被指出的那句应已改写');
+    assert.ok(!patched.includes('他知道事情没那么简单'), '原句应已不在');
+    assert.ok(patched.includes('空气仿佛凝固了'), '★没被指出的段落一字不动——这正是定点修订的意义');
+  } finally {
+    Object.assign(process.env, saved);
+    srv.close();
     await rm(root, { recursive: true, force: true });
   }
 });

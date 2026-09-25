@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { Command } from 'commander';
-import { assertStyleReady, checkChapterReadiness, checkPlanGate, convergeChapter, readState, updateChapterSummary, isPassingWorst } from '@novel/core';
+import { assertStyleReady, checkChapterReadiness, checkPlanGate, convergeChapter, readState, updateChapterSummary } from '@novel/core';
 
 interface ChapterRun {
   chapterNo: number;
@@ -10,6 +10,9 @@ interface ChapterRun {
   llmCalls: number;
   summary: 'ok' | 'skipped' | `failed:${string}`;
   readinessWarnings: string[];
+  /** human-needed 时的交接清单条数（未解决的拦截级问题） */
+  handoffFindings?: number;
+  handoffReason?: string;
 }
 
 /**
@@ -62,7 +65,7 @@ export function registerBook(program: Command): void {
 
       const runs: ChapterRun[] = [];
       let usedCalls = 0;
-      let stoppedBy: 'completed' | 'chapter-not-passed' | 'budget-exhausted' | 'plan-not-ready' = 'completed';
+      let stoppedBy: 'completed' | 'chapter-not-passed' | 'budget-exhausted' | 'plan-not-ready' | 'human-needed' = 'completed';
 
       for (let n = from; n <= to; n++) {
         if (usedCalls >= budget) {
@@ -105,24 +108,38 @@ export function registerBook(program: Command): void {
           llmCalls: g.llmCalls,
           summary,
           readinessWarnings: readiness.warnings,
+          ...(g.handoff !== undefined
+            ? { handoffFindings: g.handoff.findings.length, handoffReason: g.handoff.reason }
+            : {}),
         };
         runs.push(run);
         process.stderr.write(
-          `第 ${n} 章：${g.stopped}（worst=${g.finalWorst}，LLM×${g.llmCalls}，摘要 ${summary}）`
+          `第 ${n} 章：${g.stopped}（worst=${g.finalWorst}，LLM×${g.llmCalls}，摘要 ${summary}`
+            + `，判据 ${g.judge}）`
             + (readiness.warnings.length > 0 ? `｜写前提醒 ${readiness.warnings.length} 条` : '')
             + '\n',
         );
 
-        // 过闸判据与收敛循环同一来源：提示级不算拦截，其余任何「没走完」都停。
-        const round = g.rounds.at(-1);
-        const passed = g.stopped === 'clean' || g.stopped === 'clean-advisory'
-          || (round !== undefined && isPassingWorst(round.worst) && g.stopped !== 'max-rounds');
+        // 过闸判据与收敛循环同一来源：**只有 clean / clean-advisory 算过闸**。
+        // B-12 之后不再有含混的 max-rounds 态——「轮数用完但问题也不大」与
+        // 「机器改不动了」是两种处境，前者不该存在（问题不大就不会继续改写），
+        // 后者单列为 human-needed 并带上交接清单。
+        const passed = g.stopped === 'clean' || g.stopped === 'clean-advisory';
         if (!passed) {
-          stoppedBy = 'chapter-not-passed';
-          process.stderr.write(
-            `⛔ 第 ${n} 章未过闸（${g.stopped}），按「过闸才许写下一章」停下；修好后续跑：`
-              + `novel book --book <同一本书>（会从第 ${n} 章接着跑）\n`,
-          );
+          if (g.stopped === 'human-needed') {
+            stoppedBy = 'human-needed';
+            process.stderr.write(
+              `⛔ 第 ${n} 章机器改不动了（${g.handoff?.reason ?? '仍有拦截级问题'}），停下等人。\n`
+                + (g.handoff?.findings ?? []).map((f) => `  · ${f.check}\n    引句：${f.detail}\n`).join('')
+                + `  修好后重跑本命令（会从第 ${n} 章接着跑）。\n`,
+            );
+          } else {
+            stoppedBy = 'chapter-not-passed';
+            process.stderr.write(
+              `⛔ 第 ${n} 章未过闸（${g.stopped}），按「过闸才许写下一章」停下；修好后续跑：`
+                + `novel book --book <同一本书>（会从第 ${n} 章接着跑）\n`,
+            );
+          }
           break;
         }
       }
@@ -139,6 +156,9 @@ export function registerBook(program: Command): void {
         runs,
       };
       process.stdout.write(JSON.stringify(report) + '\n');
-      if (stoppedBy !== 'completed') process.exitCode = 1;
+      // 退出码（B-14）：0 = 跑完；1 = 没走完（未过闸 / 额度用完 / 蓝图未就绪）；
+      // 3 = 需要人工介入（机器改不动了，交接清单在 report.runs[].handoff*）
+      if (stoppedBy === 'human-needed') process.exitCode = 3;
+      else if (stoppedBy !== 'completed') process.exitCode = 1;
     });
 }
