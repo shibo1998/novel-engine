@@ -50,13 +50,15 @@ cd apps/web && node node_modules/vite/bin/vite.js   # :5319
 
 | 命令 | 作用 |
 |---|---|
-| `init --dir <目录> --title <书名>` | 开新书骨架（book.json 一次通过机检校验；非空目录拒绝） |
+| `init --dir <目录> --title <书名> [--no-plan]` | 开新书骨架（book.json 一次通过机检校验；非空目录拒绝）；**默认一并开启逐层流程**（建 `plan.json`），`--no-plan` 走旧路径 |
 | `write --book <书根> --chapter <n>` | 起草一章（draft 流水线） |
-| `generate --book <书根> --chapter <n>` | 收敛循环：缺章先起草，gate→revise 至 clean |
+| `generate --book <书根> --chapter <n> [--local-rounds n] [--rewrite-rounds n] [--no-judge]` | 收敛循环：缺章先起草 → **定点修订 ≤2** → **整章重写 ≤1** → 仍不过闸则**停下等人**（退出码 3，交接清单落 `state/handoff/`） |
 | `prompt --book <书根> --chapter <n> [--mode revise] [--dump]` | 预览 PromptBundle |
-| `preflight --book <书根> --chapter <n>` | 正典与 `outline/ch-NN.md` 准备情况（**只提示**）；另含风格/红线层就绪闸门——**未就绪则非 0 退出、阻断开写** |
+| `preflight --book <书根> --chapter <n>` | 正典与 `outline/ch-NN.md` 准备情况（**只提示**）；另含**风格/红线层**与**逐层蓝图**两道闸门——任一未就绪则非 0 退出、阻断开写 |
+| `plan init\|status\|position\|draft\|confirm` | 逐层递进建书：定位 → 设定 → 总纲 → 卷纲 → 细纲，**每层经作者确认才解锁下一层** |
+| `judge --book <书根> --chapter <n> [--advisory] [--write]` | 语义审稿（J1 蓝图契约 / J2 章末钩子 / J3 连续性）；另有 `--list` / `--scaffold` / `--status`。**证据引句命不中即降 `unsure`** |
 | `gates --book <书根> [--write]` | 跑检查器；默认只读预览，--write 回填 gateStatus |
-| `state --book <书根> [--rebuild] [--set <json>]` | 读/重建章节索引；`--set` 可写数据字段，但**门禁摘要一律被摘掉**（绿只能由 `gates` 跑出来） |
+| `state --book <书根> [--rebuild] [--set <json>]` | 读/重建章节索引；`--set` 可写数据字段，但**结论字段一律被摘掉**（`gateStatus` + `needsReview`；绿只能由 `gates` 跑出来） |
 | `summarize --book <书根> --chapter <n>` | 生成或刷新长篇上下文摘要 |
 | `rules audit --book <书根>` | 检查规则文件遗漏声明或声明路径缺失 |
 | `hooks --book <书根> [--all]` | 章末钩子锚词校验（**只读线索报告**：不计入拦截、不影响退出码，红灯须人工复核） |
@@ -78,8 +80,19 @@ cd apps/web && node node_modules/vite/bin/vite.js   # :5319
   - 排查「改了规则没效果」用 `auditRules`：会列出 `rules/` 下（含子目录）**文件在但没声明**的项，那些等于没加载
 - recordFeedback 写两处：`.soloent/feedback.jsonl`（**唯一不可重建的人工数据**，追加式，永不整份替换）+ `_candidates/` 候选（派生，可重生成）
 - `feedback.jsonl` 不放 `state/`：那目录的语义是「随时可清空重建」，而改稿记录丢了就永远没有
-- 门禁状态带**内容指纹** `checkedMtimeMs`：检查时刻的文件 mtime。内容变了、指纹不匹配 → 该章状态自动置 null（过期好过假绿）
-- 任何**不经检查就能写出「绿」**的路都必须堵掉：`novel state --set` 保留入口（fixture／迁移用途），但落盘前一律摘除 `gateStatus`——「绿」只能由 `gates` 跑出来
+- 门禁状态带**内容指纹** `checkedHash`（v2 起，取代 v1 的 mtime）：内容变了、指纹不匹配 → 该章状态自动置 null（过期好过假绿）。
+  **全项目只有一种指纹**（`packages/core/src/hash.ts` 的 `contentHash`）——两个机制必然漂移
+- 任何**不经检查就能写出「绿」**的路都必须堵掉：`novel state --set` 保留入口（fixture／迁移用途），但落盘前一律摘除**结论字段**（`gateStatus` + `needsReview`）——「绿」只能由 `gates` 跑出来
+- **所有会产生新正文的入口用同一道前置闸门**：`write` / `generate` / `book` / server 的 `/write`·`/generate` / `preflight`。
+  少挡一处就等于留了一条绕过路径（本项目已为此吃过多次亏）。两道闸门分别是**风格/红线层**与**逐层蓝图**
+  - **不连坐旧书**：没有 `.soloent/plan.json` 的书，逐层闸门恒为就绪
+  - ★`PUT /chapter`（人工改稿）**刻意不设闸门**——作者是权威。**别把它当成漏接的漏洞去「修」**，
+    那会把作者本人挡在门外
+- **gates 退出码只表示脚本有没有跑完**：`0` 跑完（结论只看 stdout 的 JSON）/ `1` 崩溃 / `2` 环境或配置错。
+  非 0 一律当失败处理，**绝不允许读成「查了没问题」**。CLI 退出码：`0` 成功 / `1` 内容未通过 / `2` 环境或参数错误 / `3` 需要人工介入
+- **判据结论与门禁结论分开落盘**（`state/judge.json` / `story.json` 的 `gateStatus`）：
+  两者不查同一项（机械 gates 判词面、Judge 判意图），合成一个字段会丢信息；
+  做决定时取**并集**当拦截集
 - 章末钩子锚词校验（`packages/core/src/hooks.ts`，入口 `novel hooks`）**只报线索不当结论**：实测证实「细纲标意图、正文写变体」，词面匹配在这个粒度不可靠，红灯 ≠ 没留钩子。故它**不接 CI 硬失败**，只出只读报告
 
 详见 [docs/ne-架构与契约.md](docs/ne-架构与契约.md)。

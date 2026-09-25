@@ -167,6 +167,14 @@ CLI `generate` 的退出码：`clean/clean-advisory/max-rounds` → 0；`llm-err
 | 章纲缺失只提示不拦截 | 章纲能提高可控性，但硬拦会让临时创作和已有旧书无法继续 |
 | `moduleResolution: NodeNext`（原 Bundler） | Bundler 不强制 `.js` 后缀，漏写靠人工 grep；NodeNext 由编译器强制，防双轨 |
 | `summarizeGateResult` 同章多条 finding 取**最大**严重度并累加 count | 原实现是 `Map.set` 覆盖，`worst` 会退化成最后一条 |
+| **`PUT /chapter`（人工改稿）刻意不设闸门**（B-61） | 作者是权威。风格层/逐层蓝图那两道门拦的是**机器生成**，不是拦人。把它也拦上是把作者本人挡在门外 |
+| 逐层闸门只对**有 `plan.json` 的书**生效 | 存量书（高武、仙侠）没走过逐层流程，一律连坐会让它们再也写不了 |
+| 判据结论落 `state/judge.json`，**不并进 `gateStatus`**（B-63） | `applyGateResult` 是**全量覆写**，并进去会被下一次机械 gate 静默冲掉；且两者不查同一项，压成一个 worst 会丢信息 |
+| 收敛循环终态用 `human-needed`，**废弃 `max-rounds`**（B-12） | 「轮数用完但问题也不大」与「机器改不动了」是两种处境，共用一个名字会让读的人误判 |
+| 定点修订的改动量超限 → **整批放弃**而不是逐条应用 | 超限说明这已不是「定点」而是「重写」，该走整章重写那条路；逐条应用会伪装成定点 |
+| 证据引句必须逐字命中，命不中降 `unsure`（B-11） | 没有这条，模型可以随口说「第 5 段与设定冲突」而根本不存在那段——比没有判据更坏 |
+| gates 退出码：`0` 跑完 / `1` 崩溃 / `2` 环境或配置错（B-14） | 非 0 只有一个含义：**本次没产出可用结论**。绝不允许读成「查了没问题」 |
+| `contentHash` 只允许一份实现（`hash.ts`）（B-13） | plan 签字 / gateStatus / 判据结论三处若各写一份，必然漂移 |
 
 ## 9. 外壳接口
 
@@ -175,6 +183,12 @@ CLI 的新增入口是：
 - `novel preflight --book <dir> --chapter <n>`：检查正典与本章章纲，输出 JSON 提醒。
 - `novel summarize --book <dir> --chapter <n>`：调用 LLM 更新 `state/summaries.json`；失败返回非 0。
 - `novel rules audit --book <dir>`：列出规则文件未声明或声明后缺失的项，只读不修改。
+- `novel plan init|status|position|draft|confirm`：逐层递进建书，每层经作者确认才解锁下一层。
+- `novel judge --book <dir> --chapter <n> [--advisory] [--write]`：语义判据（J1/J2/J3），
+  证据引句命不中即降 `unsure`；另有 `--list`/`--scaffold`/`--status`。
+- `novel book --book <dir>`：逐章跑完一本，任一章没过闸即停并报断点。
+- `tools/find-orphan-exports.mjs`：列出 core 导出但生产代码零引用的符号
+  （防「守卫在但零调用者」——本项目三次同源事故都是人肉发现的）。
 
 Server 通过 `:4319` 提供对应能力：`PUT /chapter` 保存正文，`POST /preflight`、
 `/summarize`、`/feedback`、`/rules/audit` 分别对应准备检查、摘要、改稿反馈和规则审计；
