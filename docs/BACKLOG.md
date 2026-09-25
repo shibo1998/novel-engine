@@ -11,9 +11,17 @@
 
 | # | 内容 | 暂缓原因 | 依赖 |
 |---|---|---|---|
-| B-63 | Judge 结论与 `gateStatus` 的合并语义（当前分开落盘，怎么合起来判「能否提交」未定） | **偏离了 v0.2 M11「写入 gateStatus」**：`applyGateResult` 是全量覆写，并进去会被下一次机械 gate 静默冲掉；且 M10.5 说两者不查同一项，压成一个 worst 会丢信息。详见 docs/26 §3。需作者裁定 | B-12 |
 | B-64 | Judge 假红率标定：对《高武》已写章跑一遍，人工抽查原 16 条词面红灯（P0-1 验收：假红率 < 20%） | 需真调模型、需人工抽查；标定完才知道能否把 `fail` 从「中等」升格为常规拦截 | — |
 | B-65 | `judgeChapter` 的 LLM 路径确定性测试（当前只测了纯函数 `evaluateCriteria`） | 需录制回放，否则每跑一次都要真调模型 | B-26 |
+
+## 由 B-12～B-15 拆出的后续项
+
+| # | 内容 | 暂缓原因 | 依赖 |
+|---|---|---|---|
+| B-66 | 「守卫零调用者」静态检查：列出 core 导出但在 apps/ 无引用的函数，纳入 test（docs/24 P2-3） | 本轮没做；但它是本项目的**病根检查器**——style_doc_issues / hook_check / checkPlanGate 三次同源，都靠人肉发现 | — |
+| B-67 | `gates/watch_and_check.py` 未接入 `kit.run_main` | 它是 watcher 不是 gate，退出码语义暂未统一；但同属「外部进程」这条线，早晚要对齐 | — |
+| B-68 | 定点修订的改动量上限（条数 ≤12、替换字符 ≤50%）是硬编码常量，未做成 book.json 可配 | 先按默认值跑，拿到真书数据再决定要不要暴露；现在就暴露等于猜阈值 | B-64 |
+| B-69 | human-needed 的**交接清单**只进 stderr 与报告 JSON，未落盘成文件 | 批量跑中断后，「上次卡在哪几条」得翻日志；落一份 `state/handoff/ch-NN.md` 更合用 | — |
 
 ## 由 B-10 拆出的后续项
 
@@ -36,12 +44,7 @@
 
 ## 待做 · 高优先
 
-| # | 内容 | 来源 | 暂缓原因 | 依赖 |
-|---|---|---|---|---|
-| B-12 | 收敛循环改为「定点修订 ≤2 → 整章重写 ≤1 → 停下等人」，修订按 quote 局部重写 | v0.2 M12.2 | 依赖已满足（B-11 已落地）；合并语义见 B-63 | B-11 ✓ |
-| B-13 | schema v2：gateStatus 指纹 mtime→contentHash、needsReview、修订计数、generatedBy | v0.2 §2、M1.3 | 需迁移脚本 | — |
-| B-14 | Gates 退出码语义统一（exit 只表示脚本是否崩溃，结论看 JSON） | v0.2 §0 #3 | 需同步改 Python 检查器 | — |
-| B-15 | CLI 子进程冒烟测试；Python gates 的 pytest 固件 | docs/24 P2 | — | — |
+**（空）** —— B-10 ～ B-15 全部落地（见文末「已完成」）。下一批候选见上表 B-66 与「待做 · 中优先」。
 
 ## 待做 · 中优先
 
@@ -100,9 +103,15 @@
 | B-01 | 当前状态卡：`buildPrompt` draft 模式追加 `now.md`（读 `book.json` 的 `paths.now`，缺省 `.soloent/memory/now.md`；上限 3000 码点；文件缺失或仍是「（待填）」占位则不注入）；`summarize --state-card` 产出建议到 `state/now.proposed.md`，**绝不覆盖 `now.md`**，作者手工合并 | 2026-09-25 · 6ba2813 |
 | B-02 | 相关摘要检索关键词 = 上一章末尾 ∪ 本章细纲全文 bigram（`assembleLongContext` 第 4 参 `outlineText`） | 2026-09-25 · 6ba2813 |
 | B-10 | 逐层递进建书（定位 → 设定 → 总纲 → 卷纲 → 细纲）+ 每层确认闸门；`novel plan init/status/position/draft/confirm`；`assertPlanReady` 接进 generate/book/CLI write/server `/write`·`/generate`·`/preflight`。顺带修掉 CLI `novel write` **一道门都没有**的旁路。未开启逐层流程的书恒为就绪（旧书不连坐） | 2026-09-25 · a73bd75 |
-| B-11 | 语义判据层 Judge（J1 蓝图契约 / J2 章末钩子 / J3 连续性）：证据引句命不中即降 `unsure`（防幻觉，原判留 `rawVerdict`）；判据定义在 `.soloent/judges/`、`book.json` 的 `judges.enabled` 显式声明（未声明 → 显式报错，不退化成「0 条 = 全绿」）；`novel judge --chapter N [--advisory] [--write]` + `--list/--scaffold/--status`；结论落 `state/judge.json`（绑 mtime，过期即作废）。详见 `docs/26` | 2026-09-25 · 4605a54 |
+| B-11 | 语义判据层 Judge（J1 蓝图契约 / J2 章末钩子 / J3 连续性）：证据引句命不中即降 `unsure`（防幻觉，原判留 `rawVerdict`）；判据定义在 `.soloent/judges/`、`book.json` 的 `judges.enabled` 显式声明（未声明 → 显式报错，不退化成「0 条 = 全绿」）；`novel judge --chapter N [--advisory] [--write]` + `--list/--scaffold/--status`；结论落 `state/judge.json`（绑内容指纹，过期即作废）。详见 `docs/26` | 2026-09-25 · 4605a54 |
+| B-12 | 收敛循环改为「定点修订 ≤2 → 整章重写 ≤1 → **停下等人**（`human-needed` + 交接清单）」；定点修订按 quote 局部重写，三条守卫（引句定位不到跳过 / 空替换跳过 / 改动量超限整批放弃）；**顺带落掉 B-63**：Judge 与 gates **不合表、只合「决策输入」**（各自落盘，循环取并集） | 2026-09-25 · cd46d85 |
+| B-13 | schema v2：`gateStatus` 指纹 mtime→**contentHash**（新增全项目唯一一份 `hash.ts`）、`needsReview`、`reviseCount`/`rewriteCount`、`generatedBy`；`migrateV1ToV2` **丢弃 v1 的绿**（不拿 mtime 给新格式背书）；`stripGateStatus` → `stripConclusions`（needsReview 也是结论） | 2026-09-25 · 754d132 |
+| B-14 | Gates 退出码契约统一：`0` 跑完（结论只看 stdout JSON）/ `1` 崩溃 / `2` 环境或配置错；非 0 时 stdout 也给**结构化原因**；新增「非 0 却吐完整 GateResult → 报契约违规」的失败关闭守卫；CLI 顶层 catch 按 v0.2 M16 从 1 改 2 | 2026-09-25 · 61a2e0f |
+| B-15 | CLI 子进程冒烟测试（8 项，`apps/cli/test/`）+ gates 检查器回归固件（9 项，`gates/tests/`，**用标准库 unittest 而非 pytest**）；固件经 `gates-python.test.ts` 接进 `pnpm -r test`，缺 Python 时跳过而非假绿 | 2026-09-25 · 289f410 |
+| B-63 | （随 B-12 落地）Judge 结论与 `gateStatus` 的合并语义：**不合表，只合「决策输入」**——两者不查同一项（M10.5），各自落各自的盘，循环时取并集当拦截集。信息不丢、口径不混 | 2026-09-25 · cd46d85 |
 
 > 随 B-01/B-02 一并修掉的基建缺陷：`packages/core` 的 `test` 脚本是**硬编码文件清单**，
 > 新增的 `test/memory-context.test.ts` 没被登记 → 实际只跑 55 项，B-01/B-02 的 4 项测试
 > 从未执行过。已改为 `"test/**/*.test.ts"`。（此类「测试在但不跑」的坑与 B-15「测试基建」
-> 同类，登记为教训。）当前全量：**86 项全绿**。
+> 同类，登记为教训。）当前全量：core 103 + cli 8 = **111 项全绿，0 跳过**
+> （另含 gates 检查器的 9 项 Python 固件，经 `gates-python.test.ts` 一并跑）。
