@@ -40,6 +40,24 @@ export type { ChapterReadiness, OutlineScope } from './readiness.js';
 export { recordFeedback, loadFeedback, diffLines } from './feedback.js';
 export type { DiffHunk } from './feedback.js';
 export { collectStats, editedLineCount } from './stats.js';
+export {
+  extractChapter,
+  readFacts,
+  rollbackChapterFacts,
+  parseFacts,
+  characterStateUpTo,
+  evidenceFound as factEvidenceFound,
+} from './extract.js';
+export type {
+  ChapterFacts,
+  FactsStore,
+  ExtractedCharacter,
+  ExtractedForeshadow,
+  ExtractedTimelineEvent,
+  ExtractOptions,
+  ExtractResult,
+  ParseFactsResult,
+} from './extract.js';
 export type { BookStats, ChapterStats } from './stats.js';
 export { listRuleCandidates, adoptRuleCandidate, RuleAdoptError, CANDIDATE_DIR_REL } from './rules.js';
 export type { RuleCandidate, AdoptOptions, AdoptResult } from './rules.js';

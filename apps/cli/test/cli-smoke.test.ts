@@ -343,3 +343,54 @@ test('★B-29：novel stats 报北极星；没有改稿数据时明说「没有�
     await rm(path.dirname(root), { recursive: true, force: true });
   }
 });
+
+test('★B-20：novel extract 的 --status / --rollback 可用；没抽过时明说「没抽」', async () => {
+  const root = await newBook(['--no-plan']);
+  try {
+    await writeFile(path.join(root, 'chapters', 'ch-01.md'), '# 第1章 冒烟\n\n他推开门。\n', 'utf-8');
+    await novel(['state', '--book', root, '--rebuild']);
+
+    // 没抽过 → 明确指引，不是空输出
+    const st0 = await novel(['extract', '--book', root, '--status']);
+    assert.equal(st0.code, 0);
+    assert.equal(json<{ extractedChapters: number }>(st0.stdout).extractedChapters, 0);
+    assert.match(st0.stderr, /还没有抽取任何章/);
+
+    // 手写一条事实记录（模拟已抽过）→ status 要报出来
+    const { contentHash } = await import('@novel/core');
+    const text = await readFile(path.join(root, 'chapters', 'ch-01.md'), 'utf-8');
+    await writeFile(path.join(root, 'state', 'facts.json'), JSON.stringify({
+      schemaVersion: 1, bookRoot: path.resolve(root),
+      chapters: {
+        'ch-01.md': {
+          extractedAt: new Date().toISOString(), contentHash: contentHash(text), model: 'm',
+          characters: [{ name: '林青', state: { realm: '炼气', location: '', knows: [], ignores: [], relations: [], alive: true }, cause: '', evidence: '他推开门' }],
+          foreshadows: [], timeline: [], dropped: 2, malformed: [],
+        },
+      },
+    }, null, 2), 'utf-8');
+
+    const st1 = await novel(['extract', '--book', root, '--status']);
+    const s1 = json<{ extractedChapters: number; dropped: number }>(st1.stdout);
+    assert.equal(s1.extractedChapters, 1);
+    assert.equal(s1.dropped, 2, '★丢弃数要能被看到——「抽出来了」不等于「抽对了」');
+    assert.match(st1.stderr, /丢弃 2 条/);
+
+    // 查某人截至第 N 章的状态
+    const ch = await novel(['extract', '--book', root, '--character', '林青', '--chapter', '1']);
+    assert.equal(ch.code, 0);
+    assert.equal(json<{ state: { state: { realm: string } } }>(ch.stdout).state.state.realm, '炼气');
+    // 查不存在的人 → 明说没有，并列出已记录的人
+    const miss = await novel(['extract', '--book', root, '--character', '查无此人', '--chapter', '1']);
+    assert.equal(json<{ state: unknown }>(miss.stdout).state, null);
+    assert.match(miss.stderr, /已记录的出场人物：林青/);
+
+    // 撤回
+    const rb = await novel(['extract', '--book', root, '--rollback', '1']);
+    assert.equal(rb.code, 0);
+    assert.equal(json<{ rolledBack: boolean }>(rb.stdout).rolledBack, true);
+    assert.equal(json<{ extractedChapters: number }>((await novel(['extract', '--book', root, '--status'])).stdout).extractedChapters, 0);
+  } finally {
+    await rm(path.dirname(root), { recursive: true, force: true });
+  }
+});

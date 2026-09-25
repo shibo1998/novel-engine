@@ -61,6 +61,7 @@ cd apps/web && node node_modules/vite/bin/vite.js   # :5319
 | `state --book <书根> [--rebuild] [--set <json>]` | 读/重建章节索引；`--set` 可写数据字段，但**结论字段一律被摘掉**（`gateStatus` + `needsReview`；绿只能由 `gates` 跑出来） |
 | `summarize --book <书根> --chapter <n>` | 生成或刷新长篇上下文摘要 |
 | `rules audit --book <书根>` | 检查规则文件遗漏声明或声明路径缺失 |
+| `extract --book <书根> --chapter <n>` | 抽一章的事实（人物状态/伏笔/时间线）。★**引句命不中正文的条目整条丢弃**（会喂给后续 prompt，宁可少不可假）。另有 `--from/--to` 批量、`--status`、`--rollback <n>`、`--character <名>` |
 | `stats --book <书根> [--per-chapter]` | 全书度量：★北极星 = **人工改稿行数/千字**；机器返工次数、gates 与 Judge 通过率。**不含成本统计**（能在模型后台看） |
 | `lock status\|release --book <书根>` | 书级写锁的查看与强制释放（锁由 `writeChapter`/`convergeChapter` 自动获取） |
 | `hooks --book <书根> [--all]` | 章末钩子锚词校验（**只读线索报告**：不计入拦截、不影响退出码，红灯须人工复核） |
