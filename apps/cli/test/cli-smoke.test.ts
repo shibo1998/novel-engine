@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -180,5 +180,30 @@ test('退出码：plan 跳层确认 → 2，且指明是哪个上游层没过', 
     assert.match(r.stderr, /上游层「position」/, '要指出卡在哪一层，而不是笼统报错');
   } finally {
     await rm(path.dirname(root), { recursive: true, force: true });
+  }
+});
+
+test('★B-62：风格闸门**抛错**时 preflight 仍要吐 JSON，且与「没就绪」不同形', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'novel-cli-badcfg-'));
+  const root = path.join(parent, '坏配置书');
+  try {
+    // book.json 结构非法 → 检查器 exit 2 → runStyleGate 抛错
+    await mkdir(path.join(root, '.soloent'), { recursive: true });
+    await mkdir(path.join(root, 'chapters'), { recursive: true });
+    await writeFile(path.join(root, '.soloent', 'book.json'),
+      JSON.stringify({ book: { title: '坏配置' }, paths: { chapters: 'chapters' } }), 'utf-8');
+
+    const r = await novel(['preflight', '--book', root, '--chapter', '1']);
+    assert.notEqual(r.code, 0);
+    // 旧版这里 stdout 一个字符都没有，脚本与面板只能从 stderr 猜
+    const payload = json<{ styleGate: { ready: boolean; error?: string; blocking?: string[] }; planGate: unknown }>(r.stdout);
+    assert.equal(payload.styleGate.ready, false);
+    assert.ok(typeof payload.styleGate.error === 'string' && payload.styleGate.error !== '',
+      '「没跑成」必须带 error 字段——「没就绪」带的是 blocking，两者不许同形');
+    assert.equal(payload.styleGate.blocking, undefined, '没跑成时不该有 blocking');
+    assert.notEqual(payload.planGate, undefined, '一道门失败不该把另一道门的信息冲掉');
+    assert.match(r.stderr, /没跑成/, '要说清是「没跑成」而不是「没就绪」');
+  } finally {
+    await rm(parent, { recursive: true, force: true });
   }
 });

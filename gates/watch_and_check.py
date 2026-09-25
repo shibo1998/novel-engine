@@ -197,4 +197,8 @@ def main():
 
 if __name__ == "__main__":
     kit.force_utf8()
-    sys.exit(main())
+    # 统一入口（B-67）：与两个检查器同一套退出码语义——
+    # 未捕获异常 → EXIT_CRASH(1) + stdout 结构化原因；正常返回 → EXIT_OK(0)。
+    # 它是 watcher 不是 gate（不产 findings），但同属「外部进程」这条线：
+    # 崩溃时只留一坨 traceback、stdout 一个字符都没有，排查时与「配置错」分不开。
+    kit.run_main(main)

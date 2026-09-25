@@ -15,6 +15,7 @@ import {
   recordFeedback,
   readState,
   runGates,
+  runStyleGate,
   saveChapterText,
   snapshotChapterHashes,
   updateChapterSummary,
@@ -277,14 +278,21 @@ const server = createServer(async (req, res) => {
 
       if (url.pathname === '/preflight') {
         const chapterNo = requireChapterNo(body['chapterNo']);
-        // ★面板的预检必须与 CLI 的 preflight 给出**同一个结论**（B-10）。
-        // 两边都接上逐层蓝图闸门：若面板说「可以写」而 CLI 拒绝（或反过来），
+        // ★面板的预检必须与 CLI 的 preflight 给出**同一个结论**（B-10 / B-62）。
+        // 两道门都接上：若面板说「可以写」而 CLI 拒绝（或反过来），
         // 就正好复刻本仓反复在治的矛盾——检查器说没问题、上层却当问题。
+        // 风格闸门抛错时收成显式的「没跑成」，不让它把整个响应冲掉。
+        let styleGate: unknown;
+        try {
+          styleGate = await runStyleGate(bookRoot);
+        } catch (e) {
+          styleGate = { ready: false, error: e instanceof Error ? e.message : String(e) };
+        }
         const [readiness, planGate] = await Promise.all([
           checkChapterReadiness(bookRoot, chapterNo),
           checkPlanGate(bookRoot, chapterNo),
         ]);
-        send(res, 200, { ...publicReadiness(readiness), planGate });
+        send(res, 200, { ...publicReadiness(readiness), styleGate, planGate });
         return;
       }
 

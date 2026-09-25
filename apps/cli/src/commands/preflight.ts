@@ -30,15 +30,33 @@ export function registerPreflight(program: Command): void {
     .requiredOption('--book <dir>', '书根目录绝对路径')
     .requiredOption('--chapter <n>', '章号', (v: string) => Number.parseInt(v, 10))
     .action(async (opts: { book: string; chapter: number }) => {
-      const [readiness, style, planGate] = await Promise.all([
+      // ★B-62：风格闸门**抛错**（book.json 结构非法 → 检查器 exit 2）时，
+      // 旧版整个 action 直接抛出，**stdout 一个字符都没有**——脚本与面板拿不到 planGate，
+      // 只能从 stderr 的一坨文本里猜发生了什么。
+      // 现在把它收成一个显式的「这道门没跑成」：字段在、原因在、退出码非 0。
+      // 注意这与「就绪」不同形：`ready: false` + `error` 表示**没跑成**，
+      // 而「跑成了但没就绪」只有 `ready: false` + `blocking`。
+      let style: Awaited<ReturnType<typeof runStyleGate>> | { ready: false; error: string } | null = null;
+      try {
+        style = await runStyleGate(opts.book);
+      } catch (e) {
+        style = { ready: false, error: e instanceof Error ? e.message : String(e) };
+      }
+      const [readiness, planGate] = await Promise.all([
         checkChapterReadiness(opts.book, opts.chapter),
-        runStyleGate(opts.book),
         checkPlanGate(opts.book, opts.chapter),
       ]);
       // 输出形状向后兼容：ChapterReadiness 的字段仍在顶层，新增 styleGate / planGate 两个键。
       process.stdout.write(JSON.stringify({ ...readiness, styleGate: style, planGate }) + '\n');
       let blocked = false;
-      if (!style.ready) {
+      if (style !== null && 'error' in style) {
+        process.stderr.write(
+          '⛔ 风格/红线层闸门**没跑成**（不是「没就绪」）：\n'
+            + `  ${style.error.split('\n').join('\n  ')}\n`
+            + '  先修 book.json / 检查器环境，再重跑——此时无法判断风格层是否就绪。\n',
+        );
+        blocked = true;
+      } else if (style !== null && !style.ready) {
         process.stderr.write(
           '⛔ 风格/红线层未就绪，已阻断开写：\n'
             + style.blocking.map((b) => `  · ${b}\n`).join('')
