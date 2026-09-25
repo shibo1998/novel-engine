@@ -68,8 +68,6 @@
 | B-43 | Arbiter（四类封闭裁定，默认交人，自洽采样） | v0.2 M13 |
 | B-44 | Server 长任务 202 + SSE、`POST /edit`、Last-Event-ID 补发 | v0.2 M17 |
 | B-45 | Web：时间轴/阅读器/人工介入清单/Findings 跳转、虚拟滚动、SSE 降级 | v0.2 §8 |
-| B-51 | 书目录自动 git commit（每次提交对应一次） | v0.2 X5 |
-| B-52 | 章节编号迁移：`outline/ch-NN` → 四位编号，兼容旧名 | v0.2 §3.1 |
 | B-53 | Python 检查器逐个迁移到 TS | docs/24 P1-3 |
 | B-54 | 收拢三套系统：停用 webnovel-writer 插件钩子、合并 STORY_RULES 重复条目 | docs/24 P1-1 |
 | B-55 | 清理 `content/` 无关素材（删除前列清单给作者确认） | docs/24 P1-2 |
@@ -111,6 +109,8 @@
 | B-68 | 定点修订改动量上限可配（`book.json` 的 `revise` 段）；非法值回退默认不抛错 | 2026-09-25 · d9607ba |
 | B-69 | `human-needed` 的交接清单落盘 `state/handoff/ch-NN.md`；过闸即删（过期的清单不如没有） | 2026-09-25 · d9607ba |
 | B-61 | 文档写明「`PUT /chapter` 刻意不设闸门」——README 关键边界 + 架构契约决策记录（不写下来日后必被当漏洞「修」） | 2026-09-25 · 0ea2b10 |
+| B-51 | `novel commit` + 可选自动提交：提交信息含章号（X5）；**不 push**（对外动作工具不做）；★不是 git 仓库 / 树干净 / 提交失败三种都返回 `committed:false` **且带原因**，绝不静默成功。`book.json` 的 `git.autoCommit` 默认 **false**（git 历史是作者的东西），开了才在收敛终态提交一次 | 2026-09-25 · 见下 |
+| B-52 | 章号编号：新增 `naming.ts`（**宽度只在这里算**）；**读**兼容四位/两位/无填充（存量书是两位的，只认四位会让它们一个文件都读不到）；**写**仍用两位避免混合命名；`novel migrate-numbering` **默认 dry-run** | 2026-09-25 · 见下 |
 | B-49 | 人物口吻字段（`voice.catchphrases` / `speechStyle`）：抽取时一并抽出（**抽不到就留空，不许编**），并由 J3 的参考材料注入——这是「口吻漂移」唯一可判据的来源（词面禁用词表做不到） | 2026-09-25 · 见下 |
 | B-50 | 按用途选模型 `modelFor(purpose)`：`NOVEL_MODEL_{DRAFT,REVISE,JUDGE,SUMMARY,EXTRACT,PLAN}`，缺省回退 `LLM_MODEL`。★**起草与修订刻意不共用**——定稿质量取决于它们，不该被「省 token」顺手降级。回放指纹用**生效的**模型算 | 2026-09-25 · 见下 |
 | B-23 | 伏笔台账 `state/foreshadows.json`：★**id 由引擎分配**（`f-001`，nextSeq 单调、回收不复用）；等级/计划回收章/放弃由**人**定（不可推导），同步只新增不覆盖；`paidOff` 销账，对不上的记进 `unmatchedPaidOff`（不许静默丢弃）；**逾期读时派生**；core 逾期 → 交人 | 2026-09-25 · 见下 |
@@ -126,6 +126,6 @@
 > 随 B-01/B-02 一并修掉的基建缺陷：`packages/core` 的 `test` 脚本是**硬编码文件清单**，
 > 新增的 `test/memory-context.test.ts` 没被登记 → 实际只跑 55 项，B-01/B-02 的 4 项测试
 > 从未执行过。已改为 `"test/**/*.test.ts"`。（此类「测试在但不跑」的坑与 B-15「测试基建」
-> 同类，登记为教训。）当前全量：core 172 + cli 16 = **188 项全绿，0 跳过**
+> 同类，登记为教训。）当前全量：core 179 + cli 16 = **195 项全绿，0 跳过**
 > （gates 检查器固件已增至 **19 项**，覆盖 4 个检查器）
 > （另含 gates 检查器的 9 项 Python 固件，经 `gates-python.test.ts` 一并跑）。

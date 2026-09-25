@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { cfgString, readBookConfig } from './bookcfg.js';
+import { chapterFileCandidates, resolveExistingFile } from './naming.js';
 
 /** 细纲注入上限（字符）。卷纲动辄 15–20KB，整段塞进 user 既烧 token 又冲淡任务描述。 */
 export const OUTLINE_CHAR_CAP = 4000;
@@ -127,7 +128,11 @@ export async function checkChapterReadiness(bookRoot: string, chapterNo: number)
   }
 
   const root = path.resolve(bookRoot);
-  const perChapterFile = `outline/ch-${String(chapterNo).padStart(2, '0')}.md`;
+  // 按章细纲：兼容四位（新命名）与两位（存量书）——B-52。
+  // 只认一种宽度的话，存量书会以「未找到细纲」的形式暴露，离真正的原因（宽度不匹配）很远。
+  const outlineDir = path.join(root, 'outline');
+  const perChapterFile = await resolveExistingFile(outlineDir, chapterFileCandidates(chapterNo))
+    .then((name) => (name === null ? `outline/${chapterFileCandidates(chapterNo)[0]}` : `outline/${name}`));
   const declared = await declaredOutlinePath(root);
   const [canonRaw, perChapterRaw, volumeRaw] = await Promise.all([
     readFile(path.join(root, '.soloent', 'canon.md'), 'utf-8').catch(() => ''),

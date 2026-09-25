@@ -7,9 +7,17 @@ import { runGates } from './gates.js';
 import { judgeChapter, JudgesNotDeclared, writeJudgeStatus } from './judges.js';
 import { readReviseConfig, reviseByQuote } from './revise.js';
 import { withBookLock } from './lock.js';
+import { autoCommitEnabled, commitBook } from './bookgit.js';
 import type { GateFinding, LLMResult } from './types.js';
 
-/** 章节文件名：两位数零填充，与默认 file_regex ^ch-(\d+)\.md$ 对齐（自定义命名规则的书为后续工作） */
+/**
+ * 章节文件名。
+ *
+ * ★**写仍用两位**（`ch-01.md`），因为存量书（高武、仙侠）就是两位的——
+ * 新章突然写成四位会让同一本书出现**混合命名**，那是比「没迁移」更糟的状态。
+ * 要迁就整本一起迁：`novel migrate-numbering --book <书根> --apply`。
+ * **读**两种宽度都认（`readState` 的 file_regex 是 `^ch-(\d+)\.md$`，天然都吃）。
+ */
 function chapterFileName(chapterNo: number): string {
   return `ch-${String(chapterNo).padStart(2, '0')}.md`;
 }
@@ -156,6 +164,8 @@ export interface ConvergeResult {
   handoff?: { findings: GateFinding[]; reason: string; file: string };
   /** 语义判据本轮的运行状态。'not-declared' = 没跑（明确），不是「跑了没问题」 */
   judge: 'on' | 'off' | 'not-declared';
+  /** 自动提交结果（B-51）。**没开 autoCommit 时不存在**——「没开」与「开了但没提交」形状不同 */
+  commit?: { committed: boolean; hash?: string; skippedReason?: string };
   /**
    * 本次实际发出的 LLM 请求次数上限（F15）。
    * 暴露它是为了让「重试层数 × 轮数」这个乘积**可被审计**：
@@ -530,11 +540,22 @@ async function convergeChapterLocked(o: ConvergeOptions): Promise<ConvergeResult
     break;
   }
 
+  // 每章一个可回退点（B-51）：**默认关**，要开就 book.json 里写 git.autoCommit: true。
+  // git 历史是作者的东西，工具不替他决定要不要留痕。
+  // 只在**终态**提交一次——收敛过程中的中间态提交只会把 log 弄脏。
+  let commit: { committed: boolean; hash?: string; skippedReason?: string } | undefined;
+  if (await autoCommitEnabled(root)) {
+    const title = state.chapters.find((c) => c.chapterNo === o.chapterNo)?.title ?? '';
+    const r = await commitBook({ bookRoot: root, chapterNo: o.chapterNo, ...(title !== '' ? { title } : {}) });
+    commit = { committed: r.committed, ...(r.hash !== undefined ? { hash: r.hash } : {}), ...(r.skippedReason !== undefined ? { skippedReason: r.skippedReason } : {}) };
+  }
+
   return {
     file,
     drafted,
     rounds,
     finalWorst,
+    ...(commit !== undefined ? { commit } : {}),
     stopped: assertStoppedConsistent(stopped, finalWorst),
     ...(handoff !== undefined ? { handoff } : {}),
     judge: judgeState,

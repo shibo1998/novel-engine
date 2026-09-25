@@ -19,6 +19,7 @@ import { registerStats } from './commands/stats.js';
 import { registerExtract } from './commands/extract.js';
 import { registerForeshadow } from './commands/foreshadow.js';
 import { registerLookup } from './commands/lookup.js';
+import { registerOps } from './commands/ops.js';
 
 program.name('novel').description('novel-engine 命令行外壳').version('0.0.0');
 
@@ -41,6 +42,7 @@ registerStats(program);
 registerExtract(program);
 registerForeshadow(program);
 registerLookup(program);
+registerOps(program);
 
 try {
   await program.parseAsync(process.argv);

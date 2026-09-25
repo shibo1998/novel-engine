@@ -9,6 +9,17 @@ export { runStyleGate, assertStyleReady, StyleNotReadyError, STYLE_GATE } from '
 export type { StyleGateReport, RunStyleGateOptions } from './style.js';
 export { readState, writeState, summarizeGateResult, applyGateResult, snapshotChapterHashes, stripConclusions, isPassingWorst, BLOCKING_SEVERITIES, SCHEMA_VERSION } from './state.js';
 export { contentHash } from './hash.js';
+export { commitBook, isGitRepo, autoCommitEnabled } from './bookgit.js';
+export type { CommitResult, CommitBookOptions } from './bookgit.js';
+export {
+  chapterFileName,
+  chapterFileCandidates,
+  resolveExistingFile,
+  planNumberingMigration,
+  WIDTH_2,
+  WIDTH_4,
+} from './naming.js';
+export type { NumberingPlan, NumberingPlanEntry } from './naming.js';
 export {
   acquireBookLock,
   releaseBookLock,

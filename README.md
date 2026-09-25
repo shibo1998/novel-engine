@@ -64,6 +64,8 @@ cd apps/web && node node_modules/vite/bin/vite.js   # :5319
 | `extract --book <书根> --chapter <n>` | 抽一章的事实（人物状态/伏笔/时间线）。★**引句命不中正文的条目整条丢弃**（会喂给后续 prompt，宁可少不可假）。另有 `--from/--to` 批量、`--status`、`--rollback <n>`、`--character <名>` |
 | `foreshadow sync\|list\|set --book <书根>` | 伏笔台账：★**id 由引擎分配**（`f-001`，模型不得自造）；等级/计划回收章/放弃由人定；**逾期按当前进度读时现算** |
 | `lookup character\|timeline\|conflicts --book <书根>` | 结构化反查（只读）：角色出场史与状态变化、时间线、事实层矛盾提示。★会报**抽取覆盖率**——「没记录」≠「没出场」 |
+| `commit --book <书根> [--chapter <n>] [--title <t>]` | 提交书目录改动（**不 push**）。不是 git 仓库 / 树干净时明说跳过。开 `book.json` 的 `git.autoCommit` 可在收敛结束后自动提交 |
+| `migrate-numbering --book <书根> [--apply]` | 章号编号迁移 `ch-NN.md → ch-0001.md`。★**默认只出计划**，重命名会动 git 历史与习惯，是作者的决定 |
 | `stats --book <书根> [--per-chapter]` | 全书度量：★北极星 = **人工改稿行数/千字**；机器返工次数、gates 与 Judge 通过率。**不含成本统计**（能在模型后台看） |
 | `lock status\|release --book <书根>` | 书级写锁的查看与强制释放（锁由 `writeChapter`/`convergeChapter` 自动获取） |
 | `hooks --book <书根> [--all]` | 章末钩子锚词校验（**只读线索报告**：不计入拦截、不影响退出码，红灯须人工复核） |
