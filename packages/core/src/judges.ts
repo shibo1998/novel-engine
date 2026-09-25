@@ -5,6 +5,7 @@ import { readState } from './state.js';
 import { checkChapterReadiness } from './readiness.js';
 import { readHookSpecs } from './hooks.js';
 import { contentHash } from './hash.js';
+import { DEFAULT_NOW_PATH, cfgString, cfgStringArray, readBookConfig } from './bookcfg.js';
 import type { GateFinding, GateSeverity, LLMError } from './types.js';
 
 /**
@@ -143,15 +144,8 @@ export function judgeFile(id: string): string {
 
 /** 读 book.json 的 judges.enabled（字符串数组）。读不到/坏 → 空数组（调用方据此报「未声明」） */
 export async function readJudgeDecl(bookRoot: string): Promise<string[]> {
-  const raw = await readFile(path.join(path.resolve(bookRoot), '.soloent', 'book.json'), 'utf-8').catch(() => null);
-  if (raw === null) return [];
-  try {
-    const cfg = JSON.parse(stripBom(raw)) as { judges?: { enabled?: unknown } };
-    const list = cfg.judges?.enabled;
-    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
-  } catch {
-    return [];
-  }
+  const c = await readBookConfig(bookRoot);
+  return c === null ? [] : cfgStringArray(c.cfg, 'judges', 'enabled');
 }
 
 /** 判据文件正文里可选的一行声明：`引句来源: chapter|any`。缺省按 j2/j3 同款从严（chapter）。 */
@@ -348,14 +342,9 @@ async function buildContext(root: string, chapterNo: number): Promise<{ text: st
     }
   }
 
-  const cfgRaw = await readFile(path.join(root, '.soloent', 'book.json'), 'utf-8').catch(() => '{}');
-  let nowRel = '.soloent/memory/now.md';
-  try {
-    const cfg = JSON.parse(stripBom(cfgRaw)) as { paths?: { now?: unknown } };
-    if (typeof cfg.paths?.now === 'string' && cfg.paths.now !== '') nowRel = cfg.paths.now;
-  } catch {
-    // book.json 坏了：用缺省路径，读不到就当没有——下面会显式标注
-  }
+  // book.json 坏了 → 用缺省路径；读不到就当没有，下面会**显式标注**（不静默留空）
+  const cfg = await readBookConfig(root);
+  const nowRel = cfg === null ? DEFAULT_NOW_PATH : cfgString(cfg.cfg, 'paths', 'now', DEFAULT_NOW_PATH);
   const now = stripBom(await readFile(path.join(root, nowRel), 'utf-8').catch(() => '')).trim();
   if (now !== '' && !/^[（(]待填[）)]$/.test(now.replace(/^#[^\n]*\n?/, '').trim())) {
     parts.push('# 当前状态卡（已发生事实，以此为准）', now, '');

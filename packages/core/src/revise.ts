@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { callLLM, type CallLLMOptions } from './llm.js';
 import { readState } from './state.js';
+import { cfgSection, readBookConfig } from './bookcfg.js';
 import type { GateFinding, LLMError } from './types.js';
 
 /**
@@ -55,6 +56,40 @@ export interface ReviseByQuoteOptions {
 
 const DEFAULT_MAX_PATCHES = 12;
 const DEFAULT_MAX_REPLACED_RATIO = 0.5;
+
+export interface ReviseConfig {
+  maxPatches?: number;
+  maxReplacedRatio?: number;
+}
+
+/**
+ * 从 `book.json` 的 `revise` 段读改动量上限（B-68）。
+ *
+ * 为什么可配：上限本身是**作者的口味**——有人愿意让模型一次多改几句，
+ * 有人宁可多跑几轮。写死在代码里，作者唯一的办法是改源码重编译。
+ *
+ * 为什么默认值仍然保守（12 条 / 50%）：超了就不是「定点」而是「重写」，
+ * 该走整章重写那条路。**没给真书数据之前不猜阈值**——先按默认跑，
+ * 拿 B-64 的标定结果再决定默认值要不要动。
+ *
+ * 非法值（负数/NaN/非数字）一律当「没配」，回退默认；不抛错——
+ * 一个手滑的配置不该让整章生成失败。
+ */
+export async function readReviseConfig(bookRoot: string): Promise<ReviseConfig> {
+  const c = await readBookConfig(bookRoot);
+  if (c === null) return {};
+  const sec = cfgSection(c.cfg, 'revise');
+  const num = (k: string): number | undefined => {
+    const v = sec[k];
+    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+  };
+  const maxPatches = num('maxPatches');
+  const maxReplacedRatio = num('maxReplacedRatio');
+  return {
+    ...(maxPatches !== undefined ? { maxPatches } : {}),
+    ...(maxReplacedRatio !== undefined ? { maxReplacedRatio } : {}),
+  };
+}
 
 function stripBom(text: string): string {
   return text.replace(/^\uFEFF/, '');

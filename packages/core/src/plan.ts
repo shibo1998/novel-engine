@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { callLLM } from './llm.js';
 import { contentHash } from './hash.js';
+import { bookConfigPath, cfgSection, readBookConfig, writeBookConfig } from './bookcfg.js';
 import type { LLMResult } from './types.js';
 
 /**
@@ -165,17 +166,10 @@ const POSITION_TO_BOOK_META: Record<string, string> = {
  * 返回写进去的键名，供 CLI 如实报告。
  */
 async function syncBookMeta(root: string, answers: Record<string, string>): Promise<string[]> {
-  const cfgPath = path.join(root, '.soloent', 'book.json');
-  const raw = await readFile(cfgPath, 'utf-8').catch(() => null);
-  if (raw === null) return [];
-  let cfg: Record<string, unknown>;
-  try {
-    cfg = JSON.parse(stripBom(raw)) as Record<string, unknown>;
-  } catch {
-    return [];
-  }
-  const hadBom = raw.startsWith('\uFEFF');
-  const book = { ...((cfg['book'] ?? {}) as Record<string, unknown>) };
+  const loaded = await readBookConfig(root);
+  if (loaded === null) return [];
+  const cfg = loaded.cfg;
+  const book = { ...cfgSection(cfg, 'book') };
   const written: string[] = [];
   for (const [id, key] of Object.entries(POSITION_TO_BOOK_META)) {
     const v = (answers[id] ?? '').trim();
@@ -184,8 +178,7 @@ async function syncBookMeta(root: string, answers: Record<string, string>): Prom
     written.push(key);
   }
   if (written.length === 0) return [];
-  cfg['book'] = book;
-  await atomicWrite(cfgPath, (hadBom ? '\uFEFF' : '') + JSON.stringify(cfg, null, 2) + '\n');
+  await writeBookConfig(root, { ...cfg, book }, loaded.hadBom);
   return written;
 }
 
@@ -300,12 +293,10 @@ export async function confirmLayer(
   await writePlan(root, plan);
 
   if (kind === 'detail') {
-    const cfgPath = path.join(root, '.soloent', 'book.json');
-    const raw = await readFile(cfgPath, 'utf-8');
-    const hadBom = raw.startsWith('\uFEFF');
-    const cfg = JSON.parse(stripBom(raw)) as { paths?: Record<string, unknown> };
-    cfg.paths = { ...(cfg.paths ?? {}), outline: file };
-    await atomicWrite(cfgPath, (hadBom ? '\uFEFF' : '') + JSON.stringify(cfg, null, 2) + '\n');
+    // 这一步必须成功（readiness 靠它读细纲），所以读不到就**显式抛**，不静默跳过
+    const loaded = await readBookConfig(root);
+    if (loaded === null) throw new PlanLayerError(`book.json 读不了或不存在：${bookConfigPath(root)}`);
+    await writeBookConfig(root, { ...loaded.cfg, paths: { ...cfgSection(loaded.cfg, 'paths'), outline: file } }, loaded.hadBom);
   }
   // 回传本次签下的指纹：确认动作的**凭据**就是它，作者据此核对「我签的是不是这一版」
   const report = await inspect(root, plan, kind, volume);

@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { callLLM } from './llm.js';
 import { readState } from './state.js';
+import { DEFAULT_NOW_PATH, cfgString, readBookConfig } from './bookcfg.js';
 import type { LLMResult } from './types.js';
 
 /** 单章摘要。sourceMtimeMs 与 gateStatus 同一指纹哲学：正文变了摘要即过期 */
@@ -147,9 +148,8 @@ export async function proposeStateCard(bookRoot: string, chapterNo: number): Pro
   const state = await readState({ bookRoot: root });
   const entry = state.chapters.find((c) => c.chapterNo === chapterNo);
   if (entry === undefined) throw new Error(`proposeStateCard：第 ${chapterNo} 章不在索引中`);
-  const cfgRaw = await readFile(path.join(root, '.soloent', 'book.json'), 'utf-8').catch(() => '{}');
-  const cfg = JSON.parse(cfgRaw.replace(/^﻿/, '')) as { paths?: { now?: unknown } };
-  const rel = typeof cfg.paths?.now === 'string' && cfg.paths.now !== '' ? cfg.paths.now : '.soloent/memory/now.md';
+  const cfg = await readBookConfig(root);
+  const rel = cfg === null ? DEFAULT_NOW_PATH : cfgString(cfg.cfg, 'paths', 'now', DEFAULT_NOW_PATH);
   const current = (await readFile(path.join(root, rel), 'utf-8').catch(() => '')).replace(/^﻿/, '');
   const text = await readFile(path.join(root, 'chapters', entry.file), 'utf-8');
   const r = await callLLM({

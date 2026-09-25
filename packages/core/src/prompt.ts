@@ -4,6 +4,7 @@ import { readState } from './state.js';
 import { assembleLongContext, CONTEXT_CHAR_CAP } from './summaries.js';
 import { checkChapterReadiness } from './readiness.js';
 import { contentHash } from './hash.js';
+import { bookConfigPath, cfgStringArray, readBookConfig } from './bookcfg.js';
 import type { BuildPromptOptions, GateFinding, PromptBundle, RuleRefs } from './types.js';
 
 /** 声明了但磁盘上不存在的规则文件——显式报错，绝不静默跳过（「没生效」和「没写」不能长得一样） */
@@ -79,15 +80,8 @@ export async function auditRules(bookRoot: string): Promise<RuleAudit> {
   const rulesDir = path.join(base, 'rules');
 
   const readList = async (key: string): Promise<string[]> => {
-    const raw = await readFile(path.join(base, 'book.json'), 'utf-8').catch(() => null);
-    if (raw === null) return [];
-    try {
-      const cfg = JSON.parse(stripBom(raw)) as { rules?: Record<string, unknown> };
-      const list = cfg.rules?.[key];
-      return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
-    } catch {
-      return [];
-    }
+    const c = await readBookConfig(bookRoot);
+    return c === null ? [] : cfgStringArray(c.cfg, 'rules', key);
   };
   const declared = [...(await readList('author')), ...(await readList('plugin'))];
   const forbidden = await readList('forbid');
@@ -198,7 +192,10 @@ export async function buildPrompt(o: BuildPromptOptions): Promise<PromptBundle> 
   }
   const state = await readState({ bookRoot: root });
   const dir = path.join(root, '.soloent');
-  const cfg = JSON.parse(stripBom(await readFile(path.join(dir, 'book.json'), 'utf-8'))) as Record<string, unknown>;
+  // buildPrompt 没有 book.json 就没法工作（canon/rules 都靠它定位）→ 读不到就抛，不猜
+  const loaded = await readBookConfig(root);
+  if (loaded === null) throw new Error(`buildPrompt：book.json 读不了或不存在：${bookConfigPath(root)}`);
+  const cfg = loaded.cfg;
   const meta = extractBookMeta(cfg);
   const canon = await readFile(path.join(dir, 'canon.md'), 'utf-8').catch(() => '');
   const readiness = await checkChapterReadiness(root, o.chapterNo);

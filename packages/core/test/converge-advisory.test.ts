@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { convergeChapter, isPassingWorst, resetLlmBreaker } from '../src/index.js';
@@ -93,6 +93,11 @@ test('converge：draft_free 下只剩提示级 → clean-advisory，且不为提
     Object.assign(process.env, {
       LLM_BASE_URL: base, LLM_API_KEY: 'k', LLM_MODEL: 'm', NOVEL_LLM_RETRY_ATTEMPTS: '0',
     });
+    // 预置一份**过期**的交接清单：过闸后它必须被清掉（B-69），
+    // 留着会让下次读的人以为「还卡着」
+    await mkdir(path.join(root, 'state', 'handoff'), { recursive: true });
+    await writeFile(path.join(root, 'state', 'handoff', 'ch-01.md'), '# 旧的交接清单\n', 'utf-8');
+
     resetLlmBreaker();
     const r = await convergeChapter({ bookRoot: root, chapterNo: 1 });
     assert.equal(r.stopped, 'clean-advisory', '提示级不构成拦截，应收敛为 clean-advisory');
@@ -101,6 +106,11 @@ test('converge：draft_free 下只剩提示级 → clean-advisory，且不为提
     assert.equal(r.llmCalls, 0, '提示级不该触发任何 LLM 请求');
     assert.equal(count(), 0);
     assert.equal(r.rounds.at(-1)?.action, 'stop-advisory');
+    // ★B-69：过闸 → 交接清单作废
+    await assert.rejects(
+      () => stat(path.join(root, 'state', 'handoff', 'ch-01.md')),
+      '过闸后旧的交接清单必须删掉——过期的清单不如没有',
+    );
   } finally {
     Object.assign(process.env, saved);
     close();
@@ -126,6 +136,16 @@ test('converge：非 draft_free 下同样的正文是拦截级 → 两阶段都�
     assert.equal(r.llmCalls, 3, '3 轮整章重写各一次请求');
     assert.equal(count(), 3);
     assert.equal(r.rounds.at(-1)?.action, 'stop-human-needed');
+
+    // ★B-69：交接清单要落盘，且带引句与重跑命令——
+    // 批量跑中断后要能直接翻到「上次卡在哪几条」，而不是从几十行 stderr 里捞
+    const file = r.handoff?.file ?? '';
+    assert.equal(file, 'state/handoff/ch-01.md');
+    const md = await readFile(path.join(root, file), 'utf-8');
+    assert.match(md, /# 第 1 章 · 交接清单/);
+    assert.match(md, /仍有 \d+ 条拦截级问题/, '要写清为什么停下');
+    assert.match(md, /novel generate --book <书目录> --chapter 1/, '要给出重跑命令');
+    assert.ok(md.includes('原文引句：'), '每条都要带引句，人才能定位');
   } finally {
     Object.assign(process.env, saved);
     close();

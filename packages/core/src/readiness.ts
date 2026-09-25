@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { cfgString, readBookConfig } from './bookcfg.js';
 
 /** 细纲注入上限（字符）。卷纲动辄 15–20KB，整段塞进 user 既烧 token 又冲淡任务描述。 */
 export const OUTLINE_CHAR_CAP = 4000;
@@ -102,13 +103,8 @@ export function enclosingStageHeading(text: string, chapterNo: number): string {
  * 「同一份配置两处读、两处解释」正是本仓反复在治的漂移源。
  */
 export async function declaredOutlinePath(root: string): Promise<string> {
-  try {
-    const raw = await readFile(path.join(root, '.soloent', 'book.json'), 'utf-8');
-    const cfg = JSON.parse(stripBom(raw)) as { paths?: { outline?: string } };
-    return cfg.paths?.outline ?? '';
-  } catch {
-    return '';
-  }
+  const c = await readBookConfig(root);
+  return c === null ? '' : cfgString(c.cfg, 'paths', 'outline');
 }
 
 /**

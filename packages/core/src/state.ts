@@ -2,6 +2,7 @@ import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promi
 import path from 'node:path';
 import { GateFailureError } from './gates.js';
 import { contentHash } from './hash.js';
+import { cfgString, readBookConfig } from './bookcfg.js';
 import type { ChapterIndexEntry, GateResult, GateSeverity, GateStatus, StoryState } from './types.js';
 
 /**
@@ -88,11 +89,12 @@ function countWords(text: string): number {
 
 /** 章节命名正则：优先每书配置 .soloent/book.json 的 chapter.file_regex，缺失/不可读回退默认字面量 */
 async function loadFileRegex(bookRoot: string): Promise<RegExp> {
+  const c = await readBookConfig(bookRoot);
+  const declared = c === null ? '' : cfgString(c.cfg, 'chapter', 'file_regex');
   try {
-    const raw = await readFile(path.join(bookRoot, '.soloent', 'book.json'), 'utf-8');
-    const cfg = JSON.parse(stripBom(raw)) as { chapter?: { file_regex?: string } };
-    return new RegExp(cfg.chapter?.file_regex ?? DEFAULT_FILE_REGEX);
+    return new RegExp(declared !== '' ? declared : DEFAULT_FILE_REGEX);
   } catch {
+    // 声明了但正则写错：回退默认，不让整个索引建不起来（原行为保持不变）
     return new RegExp(DEFAULT_FILE_REGEX);
   }
 }

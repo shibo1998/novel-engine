@@ -1,11 +1,11 @@
-import { rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildPrompt } from './prompt.js';
 import { callLLM, type CallLLMOptions } from './llm.js';
 import { applyGateResult, BLOCKING_SEVERITIES, isPassingWorst, readState, snapshotChapterHashes, writeState } from './state.js';
 import { runGates } from './gates.js';
 import { judgeChapter, JudgesNotDeclared, writeJudgeStatus } from './judges.js';
-import { reviseByQuote } from './revise.js';
+import { readReviseConfig, reviseByQuote } from './revise.js';
 import type { GateFinding, LLMResult } from './types.js';
 
 /** 章节文件名：两位数零填充，与默认 file_regex ^ch-(\d+)\.md$ 对齐（自定义命名规则的书为后续工作） */
@@ -140,8 +140,12 @@ export interface ConvergeResult {
     | 'clean' | 'clean-advisory' | 'human-needed' | 'max-rounds'
     | 'llm-error' | 'draft-failed' | 'gate-inconsistent' | 'aborted';
   draftError?: LLMResult;
-  /** 停下等人时的交接清单：未解决的拦截级问题（含引句），直接给人看 */
-  handoff?: { findings: GateFinding[]; reason: string };
+  /**
+   * 停下等人时的交接清单：未解决的拦截级问题（含引句）。
+   * `file` 是落盘路径（`state/handoff/ch-NN.md`）——批量跑中断后要能直接翻到
+   * 「上次卡在哪几条」，而不是从几十行 stderr 里捞。
+   */
+  handoff?: { findings: GateFinding[]; reason: string; file: string };
   /** 语义判据本轮的运行状态。'not-declared' = 没跑（明确），不是「跑了没问题」 */
   judge: 'on' | 'off' | 'not-declared';
   /**
@@ -152,6 +156,50 @@ export interface ConvergeResult {
    * 追问都只能靠推演。
    */
   llmCalls: number;
+}
+
+/** 交接清单落盘路径（相对书根） */
+function handoffRel(chapterNo: number): string {
+  return `state/handoff/ch-${String(chapterNo).padStart(2, '0')}.md`;
+}
+
+/**
+ * 把交接清单落盘（B-69）。给人看的，所以用 markdown 而不是 JSON。
+ * 返回相对路径。
+ */
+async function writeHandoff(
+  root: string,
+  chapterNo: number,
+  findings: GateFinding[],
+  reason: string,
+): Promise<string> {
+  const rel = handoffRel(chapterNo);
+  // state/handoff/ 可能还不存在：atomicWriteText 只写 `.tmp → rename`，不建目录
+  await mkdir(path.dirname(path.join(root, rel)), { recursive: true });
+  const lines = [
+    `# 第 ${chapterNo} 章 · 交接清单`,
+    '',
+    `> ${reason}`,
+    '',
+    '机器已试过「定点修订」与「整章重写」两条路。下列问题仍未解决，需要人工处理。',
+    '**改完直接重跑即可**（收敛循环会重新过闸）：',
+    '',
+    '```',
+    `novel generate --book <书目录> --chapter ${chapterNo}`,
+    '```',
+    '',
+  ];
+  findings.forEach((f, i) => {
+    lines.push(`## ${i + 1}. [${f.severity}] ${f.check}`, '');
+    if (f.detail !== '') lines.push('原文引句：', '', '> ' + f.detail.split('\n').join('\n> '), '');
+  });
+  await atomicWriteText(path.join(root, rel), lines.join('\n') + '\n');
+  return rel;
+}
+
+/** 过闸了就把该章的交接清单删掉——**过期的清单不如没有**（同 gateStatus 的过期清扫） */
+async function clearHandoff(root: string, chapterNo: number): Promise<void> {
+  await rm(path.join(root, handoffRel(chapterNo)), { force: true }).catch(() => undefined);
 }
 
 /**
@@ -239,6 +287,8 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
   let judgeState: ConvergeResult['judge'] = wantJudge ? 'on' : 'off';
   let localUsed = 0;
   let rewriteUsed = 0;
+  // 改动量上限来自 book.json（B-68）；没配就走 revise.ts 的默认值
+  const reviseCfg = await readReviseConfig(root);
 
   /**
    * 修订计数（B-13）。落在 ChapterIndexEntry 上，供 stats 回答
@@ -348,6 +398,8 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
         action: advisoryOnly ? 'stop-advisory' : 'stop-clean',
       });
       stopped = advisoryOnly ? 'clean-advisory' : 'clean';
+      // 过闸 → 清掉历史交接清单（B-69）。留着会让下次读的人以为「还卡着」
+      await clearHandoff(root, o.chapterNo);
       break;
     }
 
@@ -360,6 +412,7 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
           bookRoot: root,
           chapterNo: o.chapterNo,
           findings: blocking,
+          ...reviseCfg,
           ...(o.signal !== undefined ? { signal: o.signal } : {}),
           llm: llmOpts,
         });
@@ -439,10 +492,11 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
 
     // ── 两阶段都用完仍有拦截级 → 停下等人（B-12）──
     stopped = 'human-needed';
-    handoff = {
-      findings: blocking,
-      reason: `定点修订 ${maxLocal} 轮 + 整章重写 ${maxRewrite} 轮后，仍有 ${blocking.length} 条拦截级问题`,
-    };
+    {
+      const reason = `定点修订 ${maxLocal} 轮 + 整章重写 ${maxRewrite} 轮后，仍有 ${blocking.length} 条拦截级问题`;
+      const file = await writeHandoff(root, o.chapterNo, blocking, reason);
+      handoff = { findings: blocking, reason, file };
+    }
     // needsReview（B-13）：机器改不动了 = 这章必须有人看。这是结论字段，
     // 不许经 novel state --set 写进来（见 stripConclusions）。
     {

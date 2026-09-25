@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyPatches, locateQuote } from '../src/index.js';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { applyPatches, locateQuote, readReviseConfig } from '../src/index.js';
 import type { QuotePatch } from '../src/index.js';
 
 // B-12 定点修订：按 quote 局部重写。核心是三条守卫——
@@ -103,4 +106,66 @@ test('多条不重叠的补丁按偏移从后往前应用，互不破坏', () =>
   assert.ok(r.text.includes('他把玉简按进掌心。'));
   assert.ok(r.text.includes('院子里那棵老槐树落了一地叶子。'), '未被指出的段落保持原样');
   assert.ok(r.text.includes('灶上的水开了，白汽一股股往上冒。'));
+});
+
+// ── B-68：改动量上限可从 book.json 配 ──────────────────────────────────────
+
+async function makeBook(revise?: unknown): Promise<string> {
+  const root = await mkdtemp(path.join(tmpdir(), 'novel-revisecfg-'));
+  await mkdir(path.join(root, '.soloent'), { recursive: true });
+  await writeFile(path.join(root, '.soloent', 'book.json'), JSON.stringify({
+    book: { title: 't' }, paths: { chapters: 'chapters' }, chapter: { file_regex: '^ch-(\\d+)\\.md$' },
+    ...(revise !== undefined ? { revise } : {}),
+  }), 'utf-8');
+  return root;
+}
+
+test('★B-68：book.json 的 revise 段可覆盖改动量上限', async () => {
+  const root = await makeBook({ maxPatches: 3, maxReplacedRatio: 0.2 });
+  try {
+    assert.deepEqual(await readReviseConfig(root), { maxPatches: 3, maxReplacedRatio: 0.2 });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('★B-68：没配 / 非法值一律回退默认（手滑的配置不该让整章生成失败）', async () => {
+  for (const bad of [undefined, {}, { maxPatches: -1 }, { maxPatches: 'abc' }, { maxPatches: 0 }, { maxReplacedRatio: null }]) {
+    const root = await makeBook(bad);
+    try {
+      assert.deepEqual(await readReviseConfig(root), {}, `非法配置 ${JSON.stringify(bad)} 应回退默认`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('★B-68：读出来的配置传进 applyPatches 真的改变行为（不是读了不用）', async () => {
+  // 用接近真实章节长度的正文：短文本上「改动量 ≤50%」会先拦住，测不出 maxPatches
+  const long = [
+    '林青推开门，山风灌进来，吹得窗纸哗哗响。',
+    '院子里那棵老槐树落了一地叶子。',
+    '他知道事情没那么简单。',
+    '远处传来打更的声音，一下，两下。',
+    '他握紧了那枚玉简。',
+    '灶上的水开了，白汽一股股往上冒。',
+    '墙角那只猫抬起头，又趴了回去。',
+  ].join('\n') + '\n';
+  const three = [
+    p('他知道事情没那么简单。', '他盯着门缝里那点光。'),
+    p('他握紧了那枚玉简。', '他把玉简按进掌心。'),
+    p('林青推开门，山风灌进来，吹得窗纸哗哗响。', '林青推开门，风灌进来，窗纸哗哗响。'),
+  ];
+
+  assert.equal(applyPatches(long, three).applied.length, 3, '默认上限 12 → 三条都过');
+
+  const root = await makeBook({ maxPatches: 2 });
+  try {
+    const cfg = await readReviseConfig(root);
+    const r = applyPatches(long, three, cfg);
+    assert.equal(r.applied.length, 0, '★配了 maxPatches:2 → 整批放弃（配置真的被用上了）');
+    assert.match(r.rejected ?? '', /超过单次上限 2/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
