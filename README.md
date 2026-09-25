@@ -21,16 +21,58 @@ state/          预留状态目录（书级 state 在各书根目录下）
 
 书的数据**不在仓库内**：每本书有自己的 `<bookRoot>/`（chapters/ + .soloent/ + state/）。
 
+## 配置（**只有环境变量，没有配置文件**）
+
+★**本项目刻意不设配置文件**：LLM 凭据只走 env，绝不写入 `book.json`（作者曾明确要求）。
+也不读 `.env` 文件——建一个不会被加载，别浪费时间去找。
+
+### 必配（缺任一都会报「环境变量缺失」并 exit 2）
+
+```bash
+export LLM_BASE_URL=https://your-endpoint/v1   # OpenAI 兼容端点
+export LLM_API_KEY=sk-...
+export LLM_MODEL=your-model
+```
+
+⚠️ **注意变量名没有 `NOVEL_` 前缀**——就是 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`。
+
+Windows 下用 Git Bash 同上；用 PowerShell 则是 `setx` 或在当前会话里赋值（不落盘更安全）。
+
+### 可选：按用途换模型（省 token）
+
+不给就都用 `LLM_MODEL`。★**起草与修订刻意不共用**——定稿质量主要取决于这两步，
+不该被「省 token」顺手降级；蓝图起草反而建议更大（后续几十章都按它写）。
+
+| 变量 | 用途 | 建议 |
+|---|---|---|
+| `NOVEL_MODEL_DRAFT` | 起草正文 | **别调小** |
+| `NOVEL_MODEL_REVISE` | 定点修订 / 整章重写 | **别调小** |
+| `NOVEL_MODEL_JUDGE` | 语义判据（判对错） | 可小 |
+| `NOVEL_MODEL_SUMMARY` | 摘要/状态卡（压缩信息） | 可小 |
+| `NOVEL_MODEL_EXTRACT` | 事实抽取（结构化输出） | 可小 |
+| `NOVEL_MODEL_PLAN` | 逐层蓝图起草（影响全局） | 建议更大 |
+
+### 可选：稳定性与排查
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `NOVEL_LLM_RETRY_ATTEMPTS` | `1` | 传输失败的重试次数；`0` = 不重试（自测/离线用） |
+| `NOVEL_LLM_BREAKER_THRESHOLD` | `3` | 连续失败几次后熔断 |
+| `NOVEL_LLM_BREAKER_COOLDOWN_MS` | `60000` | 熔断后冷却多久 |
+| `NOVEL_GATE_TIMEOUT_MS` | `4000` | 检查器子进程超时 |
+| `NOVEL_LLM_RECORD_DIR` | — | 录像：把每次请求/响应脱敏落盘 |
+| `NOVEL_LLM_REPLAY_DIR` | — | 回放：不碰网络，按请求指纹取录制结果（**离线确定性测试**用） |
+| `NOVEL_PYTHON` | `python` | 检查器用的 Python 解释器 |
+
+配完自检：`novel preflight --book <书根> --chapter 1`（只报风格层是否就绪，**不消耗 token**）。
+
 ## 快速开始
 
 ```bash
 corepack pnpm install
 corepack pnpm -r build          # 根 typecheck 已内嵌先 build 再检查
 
-# LLM 凭据（只走 env，绝不写入 book.json）
-export LLM_BASE_URL=https://your-endpoint/v1
-export LLM_API_KEY=sk-...
-export LLM_MODEL=your-model
+# LLM 凭据见上方「配置」一节（只走 env，绝不写入 book.json）
 
 # 开一本新书
 node apps/cli/dist/index.js init --dir "D:/path/to/新书" --title "书名" --genre 都市 --platform 番茄

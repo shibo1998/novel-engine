@@ -192,7 +192,23 @@ export async function callLLM(b: PromptBundle, o: CallLLMOptions = {}): Promise<
     ...(model === undefined || model === '' ? ['LLM_MODEL'] : []),
   ];
   if (missing.length > 0) {
-    return { ok: false, kind: 'config', detail: `环境变量缺失: ${missing.join(', ')}` };
+    // ★只说「缺失」不够——作者第一次用时会去翻仓库找配置文件，而本仓**没有配置文件**。
+    // 报错里直接给出可执行的下一步（项目 MEMORY 里的既有纪律：错误要给下一步）。
+    const lines = missing.map((k) => {
+      const sample = k === 'LLM_BASE_URL'
+        ? 'https://your-endpoint/v1'
+        : (k === 'LLM_API_KEY' ? 'sk-...' : 'your-model');
+      return `    export ${k}=${sample}`;
+    });
+    return {
+      ok: false,
+      kind: 'config',
+      detail: `环境变量缺失: ${missing.join(', ')}\n`
+        + '  模型配置**只走环境变量，没有配置文件**（也不读 .env）——别去找配置文件了。\n'
+        + '  设置（Git Bash / Linux）：\n'
+        + lines.join('\n') + '\n'
+        + '  ⚠️ 变量名**没有 NOVEL_ 前缀**。详见 README 的「配置」一节。',
+    };
   }
 
   const attempt = async (): Promise<LLMResult> => {
