@@ -62,7 +62,6 @@
 | # | 内容 | 来源 |
 |---|---|---|
 | B-40 | Planner 滚动展开卷纲/细纲的自动生成（Premise/Compass/expandVolume/reviseCompass） | v0.2 M8 |
-| B-41 | 设定变更影响分析 + 人工圈定 + 顺序定点重写 | v0.2 L3 |
 | B-43 | Arbiter（四类封闭裁定，默认交人，自洽采样） | v0.2 M13 |
 | B-44 | Server 长任务 202 + SSE、`POST /edit`、Last-Event-ID 补发 | v0.2 M17 |
 | B-45 | Web：时间轴/阅读器/人工介入清单/Findings 跳转、虚拟滚动、SSE 降级 | v0.2 §8 |
@@ -107,6 +106,7 @@
 | B-61 | 文档写明「`PUT /chapter` 刻意不设闸门」——README 关键边界 + 架构契约决策记录（不写下来日后必被当漏洞「修」） | 2026-09-25 · 0ea2b10 |
 | B-56 | legacy 手册归档到 `docs/legacy/`（`docs/legacy-README.md` → `docs/legacy/README.md`，同 SKILL） | 2026-09-25 · 见下 |
 | B-55 | `content/` 清理**清单**已出（`docs/28-content清理清单.md`）：建议删 `oc-kaleidos`+`oc-kosmos`（642K）+`weekly-meme-report`（44K）；`wuhang-*` 列出但**不建议删**（与 `plan`/`write` 功能重叠属 B-54）。★**未删任何文件，等作者确认** | 2026-09-25 · 见下 |
+| B-41 | 设定变更影响分析 `novel impact`：①分析（全文扫关键词 + 事实库相关角色 + 台账相关伏笔）②**人工圈定** `--chapters` ③**按章号升序**逐章定点重写。★不加 `--chapters` 时**不动任何文件**；★`--rewrite` 强制升序+串行（先改后章会让它读到旧的前章）；★中途失败**停下**不继续 | 2026-09-25 · 见下 |
 | B-42 | `novel wrapup` 完本报告：伏笔回收率（分母 = 登记 − 放弃）、未回收 core 级伏笔、角色成长线（断线/境界不推进/死亡未交代）、时间线收束。★**抽取覆盖率是 blocker 不是脚注**——所有比率的可信度都取决于它；★**只报事实不评好坏**（「节奏偏慢」没有可靠判据，硬报就是编） | 2026-09-25 · 见下 |
 | B-24 | 两步提交 + 快照 checkpoint + resume + rollback：`state/checkpoints/cp-NNNN.json`（含 story.json 完整快照 + 章文件指纹）+ `state/run.pendingCommit`（记**目标指纹**）+ `state/journal.jsonl`（追加式流水）。★`resume` 按目标指纹判定**补完/回退**；★`restoreFrom` 对**来历不明**的 state 拒绝覆盖（需 `--force`）；★`rollback` **不改正文**（列出来交给书仓 git）；保留策略「最近 50 份 + 每卷末 1 份」 | 2026-09-25 · 见下 |
 | B-51 | `novel commit` + 可选自动提交：提交信息含章号（X5）；**不 push**（对外动作工具不做）；★不是 git 仓库 / 树干净 / 提交失败三种都返回 `committed:false` **且带原因**，绝不静默成功。`book.json` 的 `git.autoCommit` 默认 **false**（git 历史是作者的东西），开了才在收敛终态提交一次 | 2026-09-25 · 见下 |
@@ -126,6 +126,6 @@
 > 随 B-01/B-02 一并修掉的基建缺陷：`packages/core` 的 `test` 脚本是**硬编码文件清单**，
 > 新增的 `test/memory-context.test.ts` 没被登记 → 实际只跑 55 项，B-01/B-02 的 4 项测试
 > 从未执行过。已改为 `"test/**/*.test.ts"`。（此类「测试在但不跑」的坑与 B-15「测试基建」
-> 同类，登记为教训。）当前全量：core 200 + cli 17 = **217 项全绿，0 跳过**
+> 同类，登记为教训。）当前全量：core 207 + cli 18 = **225 项全绿，0 跳过**
 > （gates 检查器固件已增至 **19 项**，覆盖 4 个检查器）
 > （另含 gates 检查器的 9 项 Python 固件，经 `gates-python.test.ts` 一并跑）。

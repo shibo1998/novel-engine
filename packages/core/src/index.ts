@@ -65,8 +65,8 @@ export type { BookConfig } from './bookcfg.js';
 export type { ReadStateOptions, ApplyGateResultOptions } from './state.js';
 export { writeChapter, saveChapterText, convergeChapter } from './generate.js';
 export type { WriteChapterOptions, WriteChapterResult, ConvergeOptions, ConvergeResult, ConvergeRound } from './generate.js';
-export { reviseByQuote, applyPatches, locateQuote, readReviseConfig } from './revise.js';
-export type { QuotePatch, SkippedPatch, ReviseByQuoteResult, ReviseByQuoteOptions, ReviseConfig } from './revise.js';
+export { reviseByQuote, reviseByInstruction, applyPatches, locateQuote, readReviseConfig } from './revise.js';
+export type { QuotePatch, SkippedPatch, ReviseByQuoteResult, ReviseByQuoteOptions, ReviseByInstructionOptions, ReviseConfig } from './revise.js';
 export { readSummaries, assembleLongContext, updateChapterSummary, proposeStateCard, CONTEXT_CHAR_CAP } from './summaries.js';
 export type { ChapterSummary, SummaryStore, LongContext } from './summaries.js';
 export { checkChapterReadiness, extractChapterSection, enclosingStageHeading, declaredOutlinePath, OUTLINE_CHAR_CAP } from './readiness.js';
@@ -75,6 +75,8 @@ export { recordFeedback, loadFeedback, diffLines } from './feedback.js';
 export type { DiffHunk } from './feedback.js';
 export { collectStats, editedLineCount } from './stats.js';
 export { buildWrapUpReport } from './wrapup.js';
+export { analyzeImpact, rewriteInOrder } from './impact.js';
+export type { ImpactReport, ImpactHit, RewriteInOrderOptions, RewriteInOrderResult } from './impact.js';
 export type { WrapUpReport, CharacterArc } from './wrapup.js';
 export {
   extractChapter,

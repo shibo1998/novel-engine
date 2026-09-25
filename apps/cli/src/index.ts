@@ -22,6 +22,7 @@ import { registerLookup } from './commands/lookup.js';
 import { registerOps } from './commands/ops.js';
 import { registerCheckpoint } from './commands/checkpoint.js';
 import { registerWrapup } from './commands/wrapup.js';
+import { registerImpact } from './commands/impact.js';
 
 program.name('novel').description('novel-engine 命令行外壳').version('0.0.0');
 
@@ -47,6 +48,7 @@ registerLookup(program);
 registerOps(program);
 registerCheckpoint(program);
 registerWrapup(program);
+registerImpact(program);
 
 try {
   await program.parseAsync(process.argv);

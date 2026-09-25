@@ -65,6 +65,7 @@ cd apps/web && node node_modules/vite/bin/vite.js   # :5319
 | `foreshadow sync\|list\|set --book <书根>` | 伏笔台账：★**id 由引擎分配**（`f-001`，模型不得自造）；等级/计划回收章/放弃由人定；**逾期按当前进度读时现算** |
 | `lookup character\|timeline\|conflicts --book <书根>` | 结构化反查（只读）：角色出场史与状态变化、时间线、事实层矛盾提示。★会报**抽取覆盖率**——「没记录」≠「没出场」 |
 | `checkpoint list\|commit\|resume\|restore\|rollback\|prune\|journal --book <书根>` | 两步提交与快照回退。★`resume` 按**目标指纹**判定「补完还是回退」；★`restore` 对**来历不明**的 state 拒绝覆盖；★`rollback` **不改正文**（那由书仓 git 回退） |
+| `impact --book <书根> --term <词> [--term ...]` | 设定变更影响分析（**只读**）。★人工圈定 `--chapters 3,7,12` 后加 `--rewrite --instruction "改成什么"` 才动手，且**按章号升序**逐章定点改 |
 | `wrapup --book <书根> [--top <n>]` | 完本报告：伏笔回收率、角色成长线完整性、时间线收束。★**只报事实不评好坏**；所有比率都带「分母可信吗」（抽取覆盖率不满即进 blockers） |
 | `commit --book <书根> [--chapter <n>] [--title <t>]` | 提交书目录改动（**不 push**）。不是 git 仓库 / 树干净时明说跳过。开 `book.json` 的 `git.autoCommit` 可在收敛结束后自动提交 |
 | `migrate-numbering --book <书根> [--apply]` | 章号编号迁移 `ch-NN.md → ch-0001.md`。★**默认只出计划**，重命名会动 git 历史与习惯，是作者的决定 |

@@ -280,3 +280,79 @@ export async function reviseByQuote(o: ReviseByQuoteOptions): Promise<ReviseByQu
   });
   return { ok: true, ...applied };
 }
+
+// ── 按指令定点改（B-41：设定变更后顺序重写旧章）──────────────────────────────
+
+export interface ReviseByInstructionOptions {
+  bookRoot: string;
+  chapterNo: number;
+  /** 变更说明，如「林青的境界从炼气三层改为筑基初期」 */
+  instruction: string;
+  maxPatches?: number;
+  maxReplacedRatio?: number;
+  llm?: CallLLMOptions;
+  signal?: AbortSignal;
+}
+
+/**
+ * 按**变更说明**定点改一章（B-41 用）。
+ *
+ * 与 `reviseByQuote` 的区别：那边是「这几句有问题，改它们」（finding 带引句）；
+ * 这边是「设定变了，你去找出受影响的地方」（没有现成引句）。
+ *
+ * ★**三条守卫一个不少**（复用 `applyPatches`）：引句定位不到 → 跳过；
+ * 空替换 → 跳过；改动量超限 → 整批放弃。为什么这里更要紧：
+ * 「设定变了」是个**开放式指令**，模型很容易顺手把整章重写一遍——
+ * 那正是定点修订要避免的事（上一轮刚过闸的段落被改坏）。
+ */
+export async function reviseByInstruction(
+  o: ReviseByInstructionOptions,
+): Promise<ReviseByQuoteResult | LLMError> {
+  const root = path.resolve(o.bookRoot);
+  const state = await readState({ bookRoot: root });
+  const entry = state.chapters.find((c) => c.chapterNo === o.chapterNo);
+  if (entry === undefined) throw new Error(`reviseByInstruction：第 ${o.chapterNo} 章不在索引中`);
+  const text = stripBom(await readFile(path.join(root, 'chapters', entry.file), 'utf-8'));
+
+  const system = [
+    '你是中文网络小说的修订助手。**只做定点修订**：只改受「设定变更」影响的那几句，其余一字不动。',
+    '',
+    '输出格式（只输出 JSON，不要任何解释文字、不要 markdown 围栏）：',
+    '{"patches":[{"quote":"正文里的原句","replacement":"改写后的句子","reason":"一句话理由"}]}',
+    '',
+    '纪律：',
+    '- `quote` 必须是**正文里逐字存在**的原句，不要改写、不要拼接、不要自己造句；',
+    '- 只改**确实受这次设定变更影响**的地方；不要顺手改别处；',
+    '- 没有受影响的地方就回 {"patches":[]} —— **宁缺毋滥**；',
+    '- `replacement` 保持前后文衔接自然，不要改动未被影响的人名、数值。',
+  ].join('\n');
+
+  const user = [
+    `# 设定变更`,
+    o.instruction.trim(),
+    '',
+    `# 正文（第 ${o.chapterNo} 章，${entry.file}）`,
+    text.trim(),
+  ].join('\n');
+
+  const bundle = { system, user, ruleRefs: { author: [], plugin: [] } };
+  const callOpts: CallLLMOptions = { temperature: 0.2, ...o.llm, ...(o.signal !== undefined ? { signal: o.signal } : {}) };
+
+  let r = await callLLM(bundle, callOpts);
+  if (!r.ok) return r;
+  let patches = extractPatches(r.text);
+  if (patches === null) {
+    r = await callLLM(bundle, callOpts);
+    if (!r.ok) return r;
+    patches = extractPatches(r.text);
+    if (patches === null) {
+      return { ok: false, kind: 'parse', detail: `按指令修订输出不是可解析的 JSON（原文前 300 字）：${r.text.slice(0, 300)}` };
+    }
+  }
+
+  const applied = applyPatches(text, patches, {
+    ...(o.maxPatches !== undefined ? { maxPatches: o.maxPatches } : {}),
+    ...(o.maxReplacedRatio !== undefined ? { maxReplacedRatio: o.maxReplacedRatio } : {}),
+  });
+  return { ok: true, ...applied };
+}

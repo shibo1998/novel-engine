@@ -478,3 +478,38 @@ test('★B-24：novel checkpoint list/commit/resume/rollback 接在 CLI 上', as
     await rm(path.dirname(root), { recursive: true, force: true });
   }
 });
+
+test('★B-41：novel impact 只分析不动文件；--rewrite 必须配 --chapters（人工圈定）', async () => {
+  const root = await newBook(['--no-plan']);
+  try {
+    await writeFile(path.join(root, 'chapters', 'ch-01.md'), '# 第1章 冒烟\n\n林青是炼气三层。\n', 'utf-8');
+    await writeFile(path.join(root, 'chapters', 'ch-02.md'), '# 第2章 冒烟\n\n雨下了一夜。\n', 'utf-8');
+    await novel(['state', '--book', root, '--rebuild']);
+
+    // 缺 --term → 参数错
+    const noTerm = await novel(['impact', '--book', root]);
+    assert.equal(noTerm.code, 2);
+    assert.match(noTerm.stderr, /缺少 --term/);
+
+    // 只分析：命中章列出来，且**不动文件**
+    const before = await readFile(path.join(root, 'chapters', 'ch-01.md'), 'utf-8');
+    const r = await novel(['impact', '--book', root, '--term', '炼气三层']);
+    assert.equal(r.code, 0);
+    const rep = json<{ chapters: { chapterNo: number }[] }>(r.stdout);
+    assert.deepEqual(rep.chapters.map((c) => c.chapterNo), [1]);
+    assert.match(r.stderr, /没有动任何文件/, '要明说这只是分析');
+    assert.equal(await readFile(path.join(root, 'chapters', 'ch-01.md'), 'utf-8'), before, '★分析阶段不许改正文');
+
+    // --rewrite 不配 --chapters → 拒绝（机器不替人决定改哪几章）
+    const noSel = await novel(['impact', '--book', root, '--term', '炼气三层', '--rewrite', '--instruction', '改成筑基初期']);
+    assert.equal(noSel.code, 2);
+    assert.match(noSel.stderr, /必须配 --chapters/);
+
+    // --rewrite 不配 --instruction → 拒绝
+    const noInstr = await novel(['impact', '--book', root, '--term', '炼气三层', '--rewrite', '--chapters', '1']);
+    assert.equal(noInstr.code, 2);
+    assert.match(noInstr.stderr, /必须配 --instruction/);
+  } finally {
+    await rm(path.dirname(root), { recursive: true, force: true });
+  }
+});
