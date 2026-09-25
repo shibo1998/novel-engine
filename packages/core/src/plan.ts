@@ -425,7 +425,11 @@ export async function draftLayer(
   if (kind === 'volume') parts.push(`# 任务\n只展开第 ${volume} 卷。`, '');
   if (opts.note !== undefined && opts.note.trim() !== '') add('作者补充要求', opts.note);
 
-  const r = await callLLM({ system: DRAFT_SYSTEM[kind], user: parts.join('\n'), ruleRefs: { author: [], plugin: [] } });
+  const r = await callLLM(
+    { system: DRAFT_SYSTEM[kind], user: parts.join('\n'), ruleRefs: { author: [], plugin: [] } },
+    // 蓝图起草影响全局（后续几十章都按它写），purpose 单列以便配更大的模型
+    { purpose: 'plan' },
+  );
   if (!r.ok) return r;
   const rel = `state/drafts/${layerKey(kind, volume)}.md`;
   await atomicWrite(path.join(root, rel), r.text.trim() + '\n');

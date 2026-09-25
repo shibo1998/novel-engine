@@ -244,3 +244,148 @@ test('★extractChapter 全链路可确定性复现（录一遍→回放一遍�
     await rm(root, { recursive: true, force: true });
   }
 });
+
+// ── B-49 人物口吻 / B-50 按用途选模型 ──────────────────────────────────────
+
+test('★B-49：parseFacts 抽口吻；没抽到就空着（**不许编**）', () => {
+  const r = parseFacts(payload({
+    characters: [
+      { name: '林青', voice: { catchphrases: ['少废话'], speechStyle: '短句、少修饰' }, state: {}, cause: '', evidence: '林青推开门' },
+      { name: '慕容雪', state: {}, cause: '', evidence: '慕容雪在院里等他' },
+    ],
+  }), CHAPTER, 1);
+  assert.deepEqual(r.characters[0]?.voice, { catchphrases: ['少废话'], speechStyle: '短句、少修饰' });
+  assert.deepEqual(r.characters[1]?.voice, { catchphrases: [], speechStyle: '' },
+    '★抽不到就留空——编出来的口吻会让后续章节模仿一个不存在的腔调');
+});
+
+test('★B-49：人物口吻会进 J3 的参考材料（口吻漂移的唯一判据来源）', async () => {
+  const root = await makeBook();
+  let userPrompt = '';
+  const srv = createServer((req, res) => {
+    let body = '';
+    req.on('data', (d) => { body += d; });
+    req.on('end', () => {
+      try {
+        userPrompt = (JSON.parse(body) as { messages?: { role: string; content: string }[] })
+          .messages?.find((m) => m.role === 'user')?.content ?? '';
+      } catch { /* 断言用，解析失败不影响被测逻辑 */ }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ results: [] }) } }] }));
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+  const addr = srv.address();
+  const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
+
+  const saved = { ...process.env };
+  try {
+    // 夹具自检：judgeChapter 在「未声明判据」时会抛 JudgesNotDeclared，
+    // 那样 prompt 压根发不出去，断言会以「userPrompt 是空串」的形式失败——
+    // 看起来像「口吻没进 prompt」，其实是「根本没跑」。先把判据声明好。
+    const { scaffoldJudges } = await import('../src/index.js');
+    const cfgPath = path.join(root, '.soloent', 'book.json');
+    const cfg = JSON.parse(await readFile(cfgPath, 'utf-8')) as Record<string, unknown>;
+    cfg['judges'] = { enabled: ['j3-continuity'] };
+    await writeFile(cfgPath, JSON.stringify(cfg), 'utf-8');
+    await scaffoldJudges(root);
+
+    // 先塞一份带口吻的事实（模拟已抽过）
+    const { contentHash } = await import('../src/index.js');
+    await writeFile(path.join(root, 'state', 'facts.json'), JSON.stringify({
+      schemaVersion: 1, bookRoot: path.resolve(root),
+      chapters: {
+        'ch-01.md': {
+          extractedAt: '', contentHash: contentHash(CHAPTER), model: 'm',
+          characters: [{
+            name: '林青', voice: { catchphrases: ['少废话'], speechStyle: '短句、少修饰' },
+            state: { realm: '', location: '', knows: [], ignores: [], relations: [], alive: true },
+            cause: '', evidence: '林青推开门',
+          }],
+          foreshadows: [], timeline: [], dropped: 0, malformed: [],
+        },
+      },
+    }, null, 2), 'utf-8');
+
+    Object.assign(process.env, {
+      LLM_BASE_URL: `http://127.0.0.1:${port}`, LLM_API_KEY: 'k', LLM_MODEL: 'm', NOVEL_LLM_RETRY_ATTEMPTS: '0',
+    });
+    delete process.env['NOVEL_LLM_REPLAY_DIR'];
+    resetLlmBreaker();
+    const { judgeChapter } = await import('../src/index.js');
+    await judgeChapter({ bookRoot: root, chapterNo: 1 });
+
+    assert.notEqual(userPrompt, '', '夹具自检：prompt 真的发出去了');
+    assert.match(userPrompt, /# 人物口吻/, 'J3 要能看到人物口吻，否则「像不像自己」无从判起');
+    assert.match(userPrompt, /林青：短句、少修饰｜口头禅：少废话/);
+  } finally {
+    Object.assign(process.env, saved);
+    resetLlmBreaker();
+    srv.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('★B-49：没抽过口吻时，J3 的参考材料里明写「缺」而不是静默留空', async () => {
+  const root = await makeBook();
+  let userPrompt = '';
+  const srv = createServer((req, res) => {
+    let body = '';
+    req.on('data', (d) => { body += d; });
+    req.on('end', () => {
+      try {
+        userPrompt = (JSON.parse(body) as { messages?: { role: string; content: string }[] })
+          .messages?.find((m) => m.role === 'user')?.content ?? '';
+      } catch { /* 断言用 */ }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: '{"results":[]}' } }] }));
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+  const addr = srv.address();
+  const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
+  const saved = { ...process.env };
+  try {
+    const { scaffoldJudges } = await import('../src/index.js');
+    const cfgPath = path.join(root, '.soloent', 'book.json');
+    const cfg = JSON.parse(await readFile(cfgPath, 'utf-8')) as Record<string, unknown>;
+    cfg['judges'] = { enabled: ['j3-continuity'] };
+    await writeFile(cfgPath, JSON.stringify(cfg), 'utf-8');
+    await scaffoldJudges(root);
+
+    Object.assign(process.env, {
+      LLM_BASE_URL: `http://127.0.0.1:${port}`, LLM_API_KEY: 'k', LLM_MODEL: 'm', NOVEL_LLM_RETRY_ATTEMPTS: '0',
+    });
+    resetLlmBreaker();
+    const { judgeChapter } = await import('../src/index.js');
+    await judgeChapter({ bookRoot: root, chapterNo: 1 });
+    assert.notEqual(userPrompt, '', '夹具自检：prompt 真的发出去了');
+    assert.match(userPrompt, /（缺：还没抽过人物口吻/, '「没抽过」与「抽过但没口吻」必须形状不同');
+  } finally {
+    Object.assign(process.env, saved);
+    resetLlmBreaker();
+    srv.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('★B-50：modelFor 按用途取 env，显式覆盖优先，缺省回退 LLM_MODEL', async () => {
+  const { modelFor } = await import('../src/index.js');
+  const saved = { ...process.env };
+  try {
+    Object.assign(process.env, {
+      LLM_MODEL: 'big', NOVEL_MODEL_JUDGE: 'small-judge', NOVEL_MODEL_SUMMARY: 'small-sum',
+    });
+    assert.equal(modelFor('judge'), 'small-judge');
+    assert.equal(modelFor('summary'), 'small-sum');
+    assert.equal(modelFor('draft'), 'big', '★起草没配专属 env → 回退大模型（不顺手降级）');
+    assert.equal(modelFor('revise'), 'big', '★修订与起草一样：定稿质量取决于它们');
+    assert.equal(modelFor('judge', 'explicit'), 'explicit', '显式覆盖优先');
+    delete process.env['NOVEL_MODEL_JUDGE'];
+    assert.equal(modelFor('judge'), 'big', '专属 env 没配 → 回退 LLM_MODEL');
+    delete process.env['LLM_MODEL'];
+    assert.equal(modelFor('judge'), '', '都没有 → 空串，由 callLLM 报「环境变量缺失」');
+  } finally {
+    Object.assign(process.env, saved);
+  }
+});

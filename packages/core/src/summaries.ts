@@ -124,7 +124,7 @@ export async function updateChapterSummary(bookRoot: string, chapterNo: number):
     system: '你是中文小说摘要助手。把给定章节正文压缩成 150 字以内的摘要：只保留主线事件、人物状态变化、未回收的伏笔；不要评点、不要提纲式分点。',
     user: text,
     ruleRefs: { author: [], plugin: [] },
-  });
+  }, { purpose: 'summary' });
   if (!r.ok) return r;
   const store = await readSummaries(root);
   const mtimeMs = (await stat(filePath)).mtimeMs;
@@ -161,7 +161,7 @@ export async function proposeStateCard(bookRoot: string, chapterNo: number): Pro
     ].join('\n'),
     user: [`# 当前状态卡（${rel}）`, current !== '' ? current : '（空）', '', `# 本章正文（第 ${chapterNo} 章）`, text].join('\n'),
     ruleRefs: { author: [], plugin: [] },
-  });
+  }, { purpose: 'summary' });
   if (!r.ok) return r;
   const target = path.join(root, 'state', 'now.proposed.md');
   await mkdir(path.dirname(target), { recursive: true });

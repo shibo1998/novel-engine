@@ -7,6 +7,41 @@ export interface CallLLMOptions {
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;                          // 外部取消，与内部超时合并
+  /** 覆盖模型。不给则用 `modelFor(purpose)` 的结果 */
+  model?: string;
+  /**
+   * 用途（B-50）。决定「可配小模型」时读哪个 env：
+   *   draft  → `NOVEL_MODEL_DRAFT`（缺省回退 LLM_MODEL）
+   *   revise → `NOVEL_MODEL_REVISE`
+   *   judge  → `NOVEL_MODEL_JUDGE`   （判据：判对错，可以小一点）
+   *   summary→ `NOVEL_MODEL_SUMMARY` （摘要：压缩信息，小模型够）
+   *   extract→ `NOVEL_MODEL_EXTRACT` （抽取：结构化输出，小模型够）
+   *   plan   → `NOVEL_MODEL_PLAN`    （蓝图起草：影响全局，建议用大模型）
+   * ★**起草与修订刻意不共用**：定稿质量主要取决于这两步，不该被「省 token」顺手降级。
+   */
+  purpose?: LlmPurpose;
+}
+
+export type LlmPurpose = 'draft' | 'revise' | 'judge' | 'summary' | 'extract' | 'plan';
+
+const PURPOSE_ENV: Record<LlmPurpose, string> = {
+  draft: 'NOVEL_MODEL_DRAFT',
+  revise: 'NOVEL_MODEL_REVISE',
+  judge: 'NOVEL_MODEL_JUDGE',
+  summary: 'NOVEL_MODEL_SUMMARY',
+  extract: 'NOVEL_MODEL_EXTRACT',
+  plan: 'NOVEL_MODEL_PLAN',
+};
+
+/**
+ * 按用途选模型（B-50）。**只在这里决定**——散在各调用点必然漂移。
+ * 没配该用途的 env → 回退 `LLM_MODEL`；`LLM_MODEL` 也没有 → 空串（由 callLLM 报「环境变量缺失」）。
+ */
+export function modelFor(purpose: LlmPurpose, explicit?: string): string {
+  if (explicit !== undefined && explicit !== '') return explicit;
+  const byPurpose = process.env[PURPOSE_ENV[purpose]];
+  if (byPurpose !== undefined && byPurpose !== '') return byPurpose;
+  return process.env['LLM_MODEL'] ?? '';
 }
 
 const TIMEOUT_MS = 60_000;
@@ -117,7 +152,9 @@ async function recordCall(dir: string, rec: LlmRecording): Promise<void> {
  * 全程不 throw 裸 Error，错误一律归一成 LLMResult union。
  */
 export async function callLLM(b: PromptBundle, o: CallLLMOptions = {}): Promise<LLMResult> {
-  const model = process.env['LLM_MODEL'] ?? '(未知)';
+  // 模型按用途选（B-50）；显式 o.model 优先。hash 必须用**生效的**模型算，
+  // 否则换模型后回放会命中旧夹具——那会让「换了模型」这件事在测试里完全看不出来。
+  const model = modelFor(o.purpose ?? 'draft', o.model) || '(未知)';
   const hash = requestHash(model, b);
 
   // 回放先于一切（也先于熔断与 env 检查）：它不发请求，自然不该受熔断影响，

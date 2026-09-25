@@ -4,6 +4,7 @@ import { callLLM, type CallLLMOptions } from './llm.js';
 import { readState } from './state.js';
 import { checkChapterReadiness } from './readiness.js';
 import { readHookSpecs } from './hooks.js';
+import { readFacts } from './extract.js';
 import { contentHash } from './hash.js';
 import { DEFAULT_NOW_PATH, cfgString, cfgStringArray, readBookConfig } from './bookcfg.js';
 import type { GateFinding, GateSeverity, LLMError } from './types.js';
@@ -353,6 +354,25 @@ async function buildContext(root: string, chapterNo: number): Promise<{ text: st
     parts.push('# 当前状态卡', '（缺：now.md 不存在或仍是待填占位）', '');
   }
 
+  // 人物口吻（B-49）：J3 判「角色像不像自己」需要知道「他平时怎么说」。
+  // 这是唯一能让「口吻漂移」变成可判据的东西——词面禁用词表做不到这件事。
+  const facts = await readFacts(root);
+  const voiceLines: string[] = [];
+  for (const f of Object.values(facts.chapters)) {
+    for (const c of f.characters) {
+      if (c.voice.speechStyle === '' && c.voice.catchphrases.length === 0) continue;
+      voiceLines.push(
+        `- ${c.name}：${c.voice.speechStyle || '(未记风格)'}`
+          + (c.voice.catchphrases.length > 0 ? `｜口头禅：${c.voice.catchphrases.join('、')}` : ''),
+      );
+    }
+  }
+  if (voiceLines.length > 0) {
+    parts.push('# 人物口吻（由已抽章节汇总；判「角色像不像自己」以此为准）', ...voiceLines, '');
+  } else {
+    parts.push('# 人物口吻', '（缺：还没抽过人物口吻，跑 novel extract 后才有）', '');
+  }
+
   const state = await readState({ bookRoot: root });
   const prev = state.chapters.filter((c) => c.chapterNo < chapterNo).at(-1);
   if (prev !== undefined) {
@@ -507,7 +527,7 @@ export async function judgeChapter(o: JudgeChapterOptions): Promise<JudgeResult 
   ].join('\n');
 
   const bundle = { system, user, ruleRefs: { author: [], plugin: [] } };
-  const callOpts: CallLLMOptions = { temperature: 0.2, ...o.llm };
+  const callOpts: CallLLMOptions = { temperature: 0.2, purpose: 'judge', ...o.llm };
 
   let r = await callLLM(bundle, callOpts);
   if (!r.ok) return r;

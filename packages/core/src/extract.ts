@@ -31,8 +31,23 @@ import type { LLMError } from './types.js';
  * 过期的记忆不如没有（它会以「事实」的口吻说旧话）。
  */
 
+/**
+ * 人物口吻（B-49）。为什么值得单独抽：
+ * 「她说话像不像她」是长篇里最容易崩的东西——同一角色前 20 章短句直白，
+ * 第 21 章突然文绉绉，读者立刻出戏。而**词面判据看不出来**（没有禁用词可列），
+ * 只有把「这个角色平时怎么说」记下来，才能让 J3 去比。
+ */
+export interface CharacterVoice {
+  /** 口头禅/习惯用语（正文里真的出现过的） */
+  catchphrases: string[];
+  /** 说话风格（如「短句、少修饰、常反问」） */
+  speechStyle: string;
+}
+
 export interface ExtractedCharacter {
   name: string;
+  /** 口吻（B-49）。抽取不到就空着——**不许编** */
+  voice: CharacterVoice;
   /** 截至本章的状态快照（B-21 的 history 直接由这些快照组成） */
   state: {
     realm: string;
@@ -205,8 +220,10 @@ export function parseFacts(text: string, chapterText: string, chapterNo: number)
     }
     const st = (typeof o['state'] === 'object' && o['state'] !== null ? o['state'] : {}) as Record<string, unknown>;
     const rel = Array.isArray(st['relations']) ? (st['relations'] as unknown[]) : [];
+    const voiceRaw = (typeof o['voice'] === 'object' && o['voice'] !== null ? o['voice'] : {}) as Record<string, unknown>;
     out.characters.push({
       name,
+      voice: { catchphrases: strArray(voiceRaw['catchphrases']), speechStyle: str(voiceRaw['speechStyle']) },
       state: {
         realm: str(st['realm']),
         location: str(st['location']),
@@ -268,7 +285,7 @@ const SYSTEM = [
   '你是中文长篇小说的事实抽取员。**只记录正文明确写了的东西**，不做推测、不做总结、不评价。',
   '',
   '输出格式（只输出 JSON，不要任何解释文字、不要 markdown 围栏）：',
-  '{"characters":[{"name":"","state":{"realm":"","location":"","knows":[],"ignores":[],"relations":[{"to":"","kind":""}],"alive":true},"cause":"","evidence":""}],',
+  '{"characters":[{"name":"","voice":{"catchphrases":[],"speechStyle":""},"state":{"realm":"","location":"","knows":[],"ignores":[],"relations":[{"to":"","kind":""}],"alive":true},"cause":"","evidence":""}],',
   ' "foreshadows":[{"content":"","level":"minor|major|core","plantedChapter":0,"paidOff":[],"evidence":""}],',
   ' "timeline":[{"storyTime":"","event":"","participants":[],"irreversible":false,"evidence":""}]}',
   '',
@@ -277,6 +294,8 @@ const SYSTEM = [
   '- 正文没写的一律不填：不知道就留空串或空数组，**不要推测**；',
   '- `state` 记的是**截至本章结束时**的状态（境界/位置/生死/关系/信息边界）；',
   '- `ignores` 记「本章明确显示他还不知道」的事——这是悬念的来源，值得记；',
+  '- `voice.catchphrases` 只记**正文里真的出现过**的口头禅；`speechStyle` 一句话描述他怎么说话；',
+  '  抽取不到就留空——**不要编**，编出来的口吻会让后续章节模仿一个不存在的腔调；',
   '- `alive` 缺省 true；只有正文写了死亡才填 false；',
   '- 本章没有的角色不要出现；没有伏笔/时间线就给空数组。',
 ].join('\n');
@@ -310,7 +329,7 @@ export async function extractChapter(o: ExtractOptions): Promise<ExtractResult> 
     system: SYSTEM,
     user: [`# 待抽取正文（第 ${o.chapterNo} 章，${entry.file}）`, text.trim()].join('\n'),
     ruleRefs: { author: [], plugin: [] },
-  }, { temperature: 0.2, ...o.llm });
+  }, { temperature: 0.2, purpose: 'extract', ...o.llm });
   if (!r.ok) return r;
 
   const parsed = parseFacts(r.text, text, o.chapterNo);

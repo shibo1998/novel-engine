@@ -57,7 +57,7 @@ export async function writeChapter(o: WriteChapterOptions): Promise<WriteChapter
 async function writeChapterLocked(o: WriteChapterOptions): Promise<WriteChapterResult> {
   const root = path.resolve(o.bookRoot);
   const bundle = await buildPrompt({ bookRoot: root, chapterNo: o.chapterNo, mode: 'draft' });
-  const r = await callLLM(bundle, o.llm);
+  const r = await callLLM(bundle, { purpose: 'draft', ...o.llm });
   const file = chapterFileName(o.chapterNo);
   if (!r.ok) return { file, ok: false, llm: r };
   await atomicWriteText(path.join(root, 'chapters', file), r.text);
@@ -485,7 +485,7 @@ async function convergeChapterLocked(o: ConvergeOptions): Promise<ConvergeResult
       // draft_free 要避免的「拿负向禁令惩罚自由起草」）。
       const bundle = await buildPrompt({ bookRoot: root, chapterNo: o.chapterNo, mode: 'revise', findings: blocking });
       llmCalls += 1;
-      const r = await callLLM(bundle, llmOpts);
+      const r = await callLLM(bundle, { purpose: 'revise', ...llmOpts });
       if (!r.ok) {
         // 取消与「LLM 失败」分开记：前者是用户按的，后者是要排查的故障（F20-2）
         const cancelled = r.kind === 'aborted';
