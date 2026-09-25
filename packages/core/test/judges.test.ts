@@ -16,6 +16,7 @@ import {
   scaffoldJudges,
   writeJudgeStatus,
 } from '../src/index.js';
+import { contentHash } from '../src/hash.js';
 import type { GateFinding, JudgeDef, JudgeResult } from '../src/index.js';
 
 // B-11 语义判据层：证据引句防幻觉 / 未声明不静默 / 结论落盘与过期清扫
@@ -264,33 +265,37 @@ test('writeJudgeStatus：worst 取最高级、count 与 manual 分开记', async
       { severity: '轻微', chapter: 'ch-05.md', line: 0, check: 'a', detail: '' },
       { severity: '中等', chapter: 'ch-05.md', line: 0, check: 'b', detail: '' },
     ];
-    const st = await writeJudgeStatus(root, fakeResult(findings, 2), 12345);
+    const st = await writeJudgeStatus(root, fakeResult(findings, 2), 'cafebabe');
     assert.equal(st.worst, '中等');
     assert.equal(st.count, 2);
     assert.equal(st.manual, 2, '人工清单长度与拦截条数分开记');
-    assert.equal(st.checkedMtimeMs, 12345);
+    assert.equal(st.checkedHash, 'cafebabe');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test('★readJudgeStatus：章节文件被改动（mtime 不符）→ 该章判据结论作废', async () => {
+test('★readJudgeStatus：内容指纹不符 → 该章判据结论作废（v2 按内容判，不按 mtime）', async () => {
   const root = await makeBook();
   try {
     const abs = path.join(root, 'chapters', 'ch-05.md');
     await writeFile(abs, CHAPTER, 'utf-8');
-    const st = await writeJudgeStatus(root, fakeResult([], 1), 111);
+    // 写一个与真实内容不符的指纹 → 读回来必须已清掉
+    const st = await writeJudgeStatus(root, fakeResult([], 1), 'not-the-real-hash');
     assert.equal(st.count, 0);
-    // 写盘时用的是 mtime 111，与真实 mtime 不符 → 读回来必须已清掉
-    const stale = await readJudgeStatus(root);
-    assert.equal(Object.keys(stale.chapters).length, 0, 'mtime 不符的结论是假绿，必须作废');
+    assert.equal(Object.keys((await readJudgeStatus(root)).chapters).length, 0, '指纹不符的结论是假绿，必须作废');
 
-    // 用真实 mtime 落一次，再改文件 → 也要作废
-    const { stat } = await import('node:fs/promises');
-    const real = (await stat(abs)).mtimeMs;
+    // 用真实指纹落一次 → 保留
+    const real = contentHash(CHAPTER);
     await writeJudgeStatus(root, fakeResult([], 0), real);
     assert.equal(Object.keys((await readJudgeStatus(root)).chapters).length, 1);
+
+    // 只动 mtime：v2 不看它，结论应保留
     await utimes(abs, new Date(), new Date(Date.now() + 5000));
+    assert.equal(Object.keys((await readJudgeStatus(root)).chapters).length, 1, '内容没变，结论不该作废');
+
+    // 改内容：结论必须作废
+    await writeFile(abs, CHAPTER + '\n他攥紧了拳头。\n', 'utf-8');
     assert.equal(Object.keys((await readJudgeStatus(root)).chapters).length, 0, '内容变了结论即失效');
   } finally {
     await rm(root, { recursive: true, force: true });

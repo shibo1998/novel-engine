@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, mkdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -12,8 +12,9 @@ import {
   readState,
   resetLlmBreaker,
   runGates,
-  snapshotChapterMtimes,
-  stripGateStatus,
+  SCHEMA_VERSION,
+  snapshotChapterHashes,
+  stripConclusions,
   writeState,
 } from '../src/index.js';
 
@@ -84,15 +85,15 @@ test('F17：跑 gate 期间被改过的章，回填后仍回到「待检」；�
   const root = await makeBook(3);
   try {
     const state = await readState({ bookRoot: root });
-    const snapshot = await snapshotChapterMtimes(root, state.chapters);
+    const snapshot = await snapshotChapterHashes(root, state.chapters);
     const target = state.chapters[1];
 
-    // 模拟「快照之后、回填之前有人改了正文」
+    // 模拟「快照之后、回填之前有人改了正文」。v2 起改的是**内容**——
+    // 只动 mtime 已经骗不动了（见下一条用例），所以这里必须真改内容才叫「改过」。
     const p = path.join(root, 'chapters', target.file);
-    const later = new Date(Date.now() + 5000);
-    await utimes(p, later, later);
+    await writeFile(p, `# 第2章 标题\n\n${'雨停了，他抬起头。'.repeat(10)}\n`, 'utf-8');
 
-    await applyGateResult(state, fakeGateResult(root, 3), { mtimeSnapshot: snapshot });
+    await applyGateResult(state, fakeGateResult(root, 3), { hashSnapshot: snapshot });
     await writeState(state);
     const after = await readState({ bookRoot: root });
 
@@ -110,10 +111,9 @@ test('F17 反证：不给跑前快照时，改动章会被当成「已检」—�
     const state = await readState({ bookRoot: root });
     const target = state.chapters[1];
     const p = path.join(root, 'chapters', target.file);
-    const later = new Date(Date.now() + 5000);
-    await utimes(p, later, later);
+    await writeFile(p, `# 第2章 标题\n\n${'雨停了，他抬起头。'.repeat(10)}\n`, 'utf-8');
 
-    // 不给快照 → 回填时 stat 到的是**改动后**的 mtime，于是 checkedMtimeMs 与之相等，
+    // 不给快照 → 回填时读到的是**改动后**的内容，于是 checkedHash 与之相等，
     // 过期清扫认为它新鲜。断言「它没被置 null」正是为了钉住这个旧行为。
     await applyGateResult(state, fakeGateResult(root, 3));
     await writeState(state);
@@ -210,7 +210,7 @@ test('篇幅口径自检：测试用的造书函数确实写出了预期章数�
  * 用途），所以「它确实剥掉了摘要」这件事必须由测试守着——否则某次重构顺手删掉
  * `stripGateStatus`，那条路会**静默**回来，且不会有任何红灯。
  */
-test('state --set 净化：stripGateStatus 摘掉全部门禁摘要，数据字段不连坐', async () => {
+test('state --set 净化：stripConclusions 摘掉全部结论字段（gateStatus + needsReview），数据字段不连坐', async () => {
   const root = await makeBook(3);
   try {
     const state = await readState({ bookRoot: root });
@@ -219,15 +219,18 @@ test('state --set 净化：stripGateStatus 摘掉全部门禁摘要，数据字�
       chapters: state.chapters.map((ch, i) => ({
         ...ch,
         gateStatus: i === 0
-          ? { worst: 'clean' as const, count: 0, checkedAt: new Date().toISOString(), checkedMtimeMs: 1 }
+          ? { worst: 'clean' as const, count: 0, checkedAt: new Date().toISOString(), checkedHash: 'deadbeef' }
           : null,
+        needsReview: i === 1,
       })),
     };
 
-    const { state: sanitized, removed } = stripGateStatus(forged);
+    const { state: sanitized, removed } = stripConclusions(forged);
 
-    assert.equal(removed, 1, '应如实报告摘掉了 1 章的摘要');
+    assert.equal(removed.gateStatus, 1, '应如实报告摘掉了 1 章的摘要');
+    assert.equal(removed.needsReview, 1, 'needsReview 也是结论，同样要摘');
     assert.equal(sanitized.chapters.every((c) => c.gateStatus === null), true, '不得残留任何摘要');
+    assert.equal(sanitized.chapters.every((c) => !c.needsReview), true, '不得残留 needsReview');
     // 数据字段必须原样：净化只砍「结论」，不砍「输入」，否则迁移/fixture 用途就没了
     assert.deepEqual(
       sanitized.chapters.map((c) => [c.chapterNo, c.file, c.title, c.wordCount]),
@@ -244,9 +247,9 @@ test('state --set 净化：伪造的绿落盘后，readState 读回来仍是「�
   const root = await makeBook(2);
   try {
     const state = await readState({ bookRoot: root });
-    // ★这是关键夹具：checkedMtimeMs 取**真实** mtime，所以这枚假绿能存活过期清扫。
+    // ★这是关键夹具：checkedHash 取**真实内容指纹**，所以这枚假绿能存活过期清扫。
     // 若不走净化，它会一路显示成「已检通过」——这正是被堵掉的那条路。
-    const realMtime = (await stat(path.join(root, 'chapters', 'ch-01.md'))).mtimeMs;
+    const realHash = state.chapters[0]!.contentHash;
     const forged = {
       ...state,
       chapters: state.chapters.map((ch) => ({
@@ -255,12 +258,13 @@ test('state --set 净化：伪造的绿落盘后，readState 读回来仍是「�
           worst: 'clean' as const,
           count: 0,
           checkedAt: new Date().toISOString(),
-          checkedMtimeMs: realMtime,
+          checkedHash: realHash,
         },
+        needsReview: true,
       })),
     };
 
-    await writeState(stripGateStatus(forged).state);
+    await writeState(stripConclusions(forged).state);
     const back = await readState({ bookRoot: root });
 
     assert.equal(
@@ -268,6 +272,97 @@ test('state --set 净化：伪造的绿落盘后，readState 读回来仍是「�
       true,
       '未经检查的「绿」不得从 state --set 这条路进来',
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// ── B-13：schema v2（指纹 mtime → contentHash）─────────────────────────────
+
+test('★B-13：只动 mtime、内容没变 → 结论**不**作废（v1 在这里会白跑一遍检查器）', async () => {
+  const root = await makeBook(2);
+  try {
+    const state = await readState({ bookRoot: root });
+    await applyGateResult(state, fakeGateResult(root, 2));
+    await writeState(state);
+    const before = await readState({ bookRoot: root });
+    assert.ok(before.chapters.every((c) => c.gateStatus !== null), '先有结论');
+
+    // git checkout / 复制文件就是这个效果：内容一模一样，mtime 变了
+    const p = path.join(root, 'chapters', 'ch-01.md');
+    const later = new Date(Date.now() + 5000);
+    await utimes(p, later, later);
+
+    const after = await readState({ bookRoot: root });
+    assert.ok(
+      after.chapters.every((c) => c.gateStatus !== null),
+      'v2 按内容指纹判定：内容没变，结论就不该作废',
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('★B-13：内容真变了 → 结论作废（哪怕 mtime 被改回去）', async () => {
+  const root = await makeBook(2);
+  try {
+    const state = await readState({ bookRoot: root });
+    await applyGateResult(state, fakeGateResult(root, 2));
+    await writeState(state);
+    const p = path.join(root, 'chapters', 'ch-01.md');
+    const mtimeBefore = (await stat(p)).mtimeMs;
+
+    await writeFile(p, '# 第1章 标题\n\n正文被换掉了。\n', 'utf-8');
+    // 把 mtime 改回原值——v1 靠 mtime 判过期，这一步就能骗过它
+    await utimes(p, new Date(mtimeBefore), new Date(mtimeBefore));
+
+    const after = await readState({ bookRoot: root });
+    assert.equal(
+      after.chapters.find((c) => c.file === 'ch-01.md')?.gateStatus,
+      null,
+      'v2 按内容指纹判定：内容变了就必须作废，mtime 改回去也没用',
+    );
+    assert.equal(after.chapters.find((c) => c.file === 'ch-02.md')?.gateStatus !== null, true, '没改的章不受连坐');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('★B-13：v1 的 story.json 能读进来，但 gateStatus 一律丢弃（不拿 mtime 给新格式背书）', async () => {
+  const root = await makeBook(2);
+  try {
+    // 手写一份 v1 的 state：带 mtime 指纹的「绿」
+    const files = ['ch-01.md', 'ch-02.md'];
+    const v1 = {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      bookRoot: path.resolve(root),
+      chapters: files.map((file, i) => ({
+        chapterNo: i + 1,
+        file,
+        title: `第${i + 1}章`,
+        wordCount: 100,
+        gateStatus: { worst: 'clean', count: 0, checkedAt: new Date().toISOString(), checkedMtimeMs: 1 },
+      })),
+    };
+    await mkdir(path.join(root, 'state'), { recursive: true });
+    await writeFile(path.join(root, 'state', 'story.json'), JSON.stringify(v1, null, 2), 'utf-8');
+
+    const s = await readState({ bookRoot: root });
+    assert.equal(s.schemaVersion, SCHEMA_VERSION, '读进来即升到 v2');
+    assert.equal(s.chapters.length, 2, '章节不丢');
+    assert.equal(s.chapters[0]?.title, '第1章', '数据字段保留');
+    assert.equal(
+      s.chapters.every((c) => c.gateStatus === null),
+      true,
+      'v1 的绿是用 mtime 判的——那正是要废掉的信号，不能带进 v2',
+    );
+    assert.equal(s.chapters.every((c) => c.contentHash !== ''), true, '迁移后指纹由当前内容算出来');
+
+    // 落盘后再读，版本稳定
+    await writeState(s);
+    const raw = JSON.parse(await readFile(path.join(root, 'state', 'story.json'), 'utf-8')) as { schemaVersion: number };
+    assert.equal(raw.schemaVersion, SCHEMA_VERSION);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

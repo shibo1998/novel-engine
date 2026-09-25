@@ -32,7 +32,7 @@ test('summarizeGateResult：同章多条 finding 累加 count 且 worst 取最�
   const m = summarizeGateResult(result);
   assert.equal(m.get('ch-01.md')?.count, 3, 'count 必须累加到 3');
   assert.equal(m.get('ch-01.md')?.worst, '严重', 'worst 必须取最大严重度，而非最后一条');
-  assert.equal(m.get('ch-01.md')?.checkedMtimeMs, 0, '聚合层拿不到 mtime，恒为占位 0');
+  assert.equal(m.get('ch-01.md')?.checkedHash, '', '聚合层拿不到内容，恒为占位空串');
 });
 
 test('recordFeedback：落 .soloent/feedback.jsonl，一条一行，可反查', async () => {
@@ -100,7 +100,7 @@ test('saveChapterText：保存后同步刷新章节索引并清空旧门禁状�
   try {
     const state = await readState({ bookRoot: root, force: true });
     state.chapters[0]!.gateStatus = {
-      worst: 'clean', count: 0, checkedAt: '2026-01-01T00:00:00.000Z', checkedMtimeMs: 1,
+      worst: 'clean', count: 0, checkedAt: '2026-01-01T00:00:00.000Z', checkedHash: 'deadbeef',
     };
     await writeState(state);
 

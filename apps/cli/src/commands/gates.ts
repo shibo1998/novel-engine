@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { runGates, readState, writeState, applyGateResult, snapshotChapterMtimes } from '@novel/core';
+import { runGates, readState, writeState, applyGateResult, snapshotChapterHashes } from '@novel/core';
 
 export function registerGates(program: Command): void {
   program
@@ -25,9 +25,9 @@ export function registerGates(program: Command): void {
       // skipStaleSweep（F16）：本轮会把每一章的 gateStatus 整体覆写，清扫结果注定被丢弃，
       // 关掉它省掉一整轮全量 stat——过闸链路的 IO 于是收敛为「正好一轮 stat」。
       const state = await readState({ bookRoot: opts.book, skipStaleSweep: true });
-      const mtimeSnapshot = await snapshotChapterMtimes(state.bookRoot, state.chapters);
+      const hashSnapshot = await snapshotChapterHashes(state.bookRoot, state.chapters);
       const result = await runGates({ bookRoot: opts.book });
-      const checkedAt = await applyGateResult(state, result, { mtimeSnapshot });
+      const checkedAt = await applyGateResult(state, result, { hashSnapshot });
       await writeState(state);
       process.stdout.write(
         JSON.stringify({

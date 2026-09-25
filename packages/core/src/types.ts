@@ -1,6 +1,6 @@
 export interface StoryState {
-  /** 落盘格式版本；读取时不符即视为过期，丢弃并重建 */
-  schemaVersion: 1;
+  /** 落盘格式版本；读取时不符即视为过期，丢弃并重建（v1 会先走 migrate 升到 v2） */
+  schemaVersion: 2;
   /** 索引生成时刻，ISO 8601 */
   generatedAt: string;
   /** 书根绝对路径，用于校验 state 与书是否配对 */
@@ -19,8 +19,27 @@ export interface ChapterIndexEntry {
   title: string;
   /** 正文字符数，口径：整个文件去掉全部空白字符后的码点数 */
   wordCount: number;
-  /** 最近一次门禁摘要；文件从未被检查过为 null */
+  /**
+   * 内容指纹（见 hash.ts）。**这是「内容变没变」的唯一判据**（v2 起）。
+   * v1 用的是文件 mtime，而 mtime 两个方向都会骗人：
+   * git checkout / 复制文件会刷新 mtime 造成**假过期**（白跑一遍检查器）；
+   * 同一毫秒内的改动则可能 mtime 不变造成**假绿**（更危险）。
+   */
+  contentHash: string;
+  /** 最近一次门禁摘要；文件从未被检查过、或内容已变（指纹不符）为 null */
   gateStatus: GateStatus | null;
+  /**
+   * 需要人工过目（B-13）。当前来源：判据层出了 `unsure`（人工清单非空），
+   * 或收敛循环停在 `human-needed`。
+   * 与 gateStatus 同属**结论字段**——不得经由 `novel state --set` 写入。
+   */
+  needsReview: boolean;
+  /** 定点修订累计次数（B-12/B-13），用于 stats 的「机器改了几次」 */
+  reviseCount: number;
+  /** 整章重写累计次数 */
+  rewriteCount: number;
+  /** 质量归因：这一章是谁写的、按哪版 prompt 写的（B-13） */
+  generatedBy?: { model: string; promptHash: string; at: string };
 }
 
 /** 单章门禁摘要：由 runGates 结果聚合，不由 core 自动回填 */
@@ -31,8 +50,11 @@ export interface GateStatus {
   count: number;
   /** 审计用时间戳：这次聚合发生在何时 */
   checkedAt: string;
-  /** 检查时刻该章节文件的 mtime（ms）。readState 读时与当前 mtime 比对，不等即视为过期并置 null */
-  checkedMtimeMs: number;
+  /**
+   * 检查时刻该章的内容指纹（v2 起，取代 v1 的 checkedMtimeMs）。
+   * readState 读时与当前 contentHash 比对，不等即视为过期并置 null。
+   */
+  checkedHash: string;
 }
 
 export interface BuildPromptOptions {
@@ -52,6 +74,13 @@ export interface PromptBundle {
   system: string;      // 身份 + canon + author rules + plugin rules
   user: string;        // 本章任务 + 上下文 + 待修问题
   ruleRefs: RuleRefs;  // 实际加载的规则文件（声明与实际不等即 bug）
+  /**
+   * 内容指纹（B-13）：system+user 的 contentHash，供 generatedBy 做质量归因。
+   * `buildPrompt` 一定会给。judge / summarize / revise / plan 这些**内部** prompt
+   * 目前不参与归因，故可省——它们是引擎自己的固定提示词，不随本书规则漂移，
+   * 归因价值与章节正文不同（那才是「这批章是用哪版规则跑的」要回答的问题）。
+   */
+  hash?: string;
 }
 
 export type LLMError =

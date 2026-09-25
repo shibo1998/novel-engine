@@ -4,6 +4,7 @@ import { callLLM, type CallLLMOptions } from './llm.js';
 import { readState } from './state.js';
 import { checkChapterReadiness } from './readiness.js';
 import { readHookSpecs } from './hooks.js';
+import { contentHash } from './hash.js';
 import type { GateFinding, GateSeverity, LLMError } from './types.js';
 
 /**
@@ -561,8 +562,12 @@ export interface JudgeChapterStatus {
   /** unsure 条数——人工清单长度，与 count（拦截级 fail 数）分开记 */
   manual: number;
   checkedAt: string;
-  /** 检查时刻该章文件的 mtime（ms）；与 gateStatus 同款，readState 的过期清扫照此比对 */
-  checkedMtimeMs: number;
+  /**
+   * 判定时刻该章的内容指纹（v2 起，取代 checkedMtimeMs）。
+   * 与 gateStatus 同款语义：与当前指纹不符即作废。
+   * **全项目只有一种指纹**（hash.ts 的 contentHash）——两个机制必然漂移。
+   */
+  checkedHash: string;
   judges: string[];
 }
 
@@ -613,11 +618,11 @@ async function atomicWrite(target: string, text: string): Promise<void> {
  * `applyGateResult` 是**全量覆写**——机械 gates 每跑一次就把每一章的 gateStatus 重写一遍。
  * 判据结论若并进去，会被下一次机械 gate 跑**静默冲掉**，变成「写进去了但会丢」。
  * 且 M10.5 明说 Gates 与 Judge 不查同一项，合成一个 worst 会丢信息。
- * 所以判据结论单独落一个文件、单独带 checkedMtimeMs。
+ * 所以判据结论单独落一个文件、单独带 checkedHash。
  * 两者怎么合起来判「能否提交」是 B-12 的事，那时才有真正的合并语义需求。
  * （此偏离已登记 BACKLOG，待作者裁定。）
  */
-export async function writeJudgeStatus(root0: string, result: JudgeResult, mtimeMs: number): Promise<JudgeChapterStatus> {
+export async function writeJudgeStatus(root0: string, result: JudgeResult, hash: string): Promise<JudgeChapterStatus> {
   const root = path.resolve(root0);
   const store = await readJudgeStore(root);
   let worst: GateSeverity | 'clean' = 'clean';
@@ -631,7 +636,7 @@ export async function writeJudgeStatus(root0: string, result: JudgeResult, mtime
     count,
     manual: result.manual.length,
     checkedAt: new Date().toISOString(),
-    checkedMtimeMs: mtimeMs,
+    checkedHash: hash,
     judges: result.judges,
   };
   store.chapters[result.file] = status;
@@ -639,7 +644,12 @@ export async function writeJudgeStatus(root0: string, result: JudgeResult, mtime
   return status;
 }
 
-/** 读判据结论（含过期清扫：mtime 不符即删该章条目，与 readState 同款语义） */
+/**
+ * 读判据结论（含过期清扫：指纹不符即删该章条目，与 readState 同款语义）。
+ *
+ * v2（B-13）：按 contentHash 比对，不再按 mtime。旧格式（checkedMtimeMs）的条目
+ * 一律丢弃——拿 mtime 给结论背书正是我们要废掉的做法，不能带进新格式。
+ */
 export async function readJudgeStatus(bookRoot: string): Promise<JudgeStore> {
   const root = path.resolve(bookRoot);
   const store = await readJudgeStore(root);
@@ -647,12 +657,12 @@ export async function readJudgeStatus(bookRoot: string): Promise<JudgeStore> {
   const files = await readdir(dir).catch(() => [] as string[]);
   const known = new Set(files);
   for (const [file, st] of Object.entries(store.chapters)) {
-    if (!known.has(file)) {
+    if (!known.has(file) || typeof st.checkedHash !== 'string' || st.checkedHash === '') {
       delete store.chapters[file];
       continue;
     }
-    const s = await stat(path.join(dir, file)).catch(() => null);
-    if (s === null || s.mtimeMs !== st.checkedMtimeMs) delete store.chapters[file];
+    const raw = await readFile(path.join(dir, file), 'utf-8').catch(() => null);
+    if (raw === null || contentHash(stripBom(raw)) !== st.checkedHash) delete store.chapters[file];
   }
   return store;
 }

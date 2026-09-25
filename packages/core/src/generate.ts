@@ -2,7 +2,7 @@ import { rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildPrompt } from './prompt.js';
 import { callLLM, type CallLLMOptions } from './llm.js';
-import { applyGateResult, BLOCKING_SEVERITIES, readState, snapshotChapterMtimes, writeState } from './state.js';
+import { applyGateResult, BLOCKING_SEVERITIES, readState, snapshotChapterHashes, writeState } from './state.js';
 import { runGates } from './gates.js';
 import { judgeChapter, JudgesNotDeclared, writeJudgeStatus } from './judges.js';
 import { reviseByQuote } from './revise.js';
@@ -42,7 +42,10 @@ export interface WriteChapterResult {
   llm?: LLMResult;
 }
 
-/** 4.4 draft 流水线：buildPrompt(draft) → callLLM → 原子写 ch-NN.md → writeState（重建索引，新章 gateStatus 为 null） */
+/**
+ * 4.4 draft 流水线：buildPrompt(draft) → callLLM → 原子写 ch-NN.md → writeState
+ * （重建索引，新章 gateStatus 为 null、计数归零，并记 generatedBy 供质量归因）
+ */
 export async function writeChapter(o: WriteChapterOptions): Promise<WriteChapterResult> {
   const root = path.resolve(o.bookRoot);
   const bundle = await buildPrompt({ bookRoot: root, chapterNo: o.chapterNo, mode: 'draft' });
@@ -51,6 +54,17 @@ export async function writeChapter(o: WriteChapterOptions): Promise<WriteChapter
   if (!r.ok) return { file, ok: false, llm: r };
   await atomicWriteText(path.join(root, 'chapters', file), r.text);
   const state = await readState({ bookRoot: root, force: true });
+  // 质量归因（B-13）：这一章是谁写的、按哪版 prompt 写的。
+  // promptHash 是 system+user 的指纹——同一版规则下重写会得到同一 hash，
+  // 换规则/换上下文才会变，因此能回答「这批章是用哪版规则跑的」。
+  const entry = state.chapters.find((c) => c.chapterNo === o.chapterNo);
+  if (entry !== undefined) {
+    entry.generatedBy = {
+      model: process.env['LLM_MODEL'] ?? '(未知)',
+      promptHash: bundle.hash ?? '',
+      at: new Date().toISOString(),
+    };
+  }
   await writeState(state);
   return { file, ok: true };
 }
@@ -198,6 +212,19 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
   let localUsed = 0;
   let rewriteUsed = 0;
 
+  /**
+   * 修订计数（B-13）。落在 ChapterIndexEntry 上，供 stats 回答
+   * 「这一章被机器改了几次」——不记的话，「人工改稿行数/千字」这个北极星指标
+   * 就分不清「作者改得多」是因为模型一次没写好，还是因为循环空转了。
+   */
+  const bumpCounter = async (which: 'revise' | 'rewrite'): Promise<void> => {
+    const e = state.chapters.find((c) => c.chapterNo === o.chapterNo);
+    if (e === undefined) return;
+    if (which === 'revise') e.reviseCount += 1;
+    else e.rewriteCount += 1;
+    await writeState(state);
+  };
+
   for (;;) {
     const roundNo = rounds.length + 1;
     // 每轮先看取消（F20-2）：取消是「外部决定」，必须在动 LLM 之前就生效
@@ -210,10 +237,10 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
     // 旧版是「跑完再 stat 回填」：本轮（或上一轮刚改写）变更的 mtime 会被当成「已检」，
     // 形成假绿窗口。只认快照值后，跑期间被改的章会在下次 readState 清扫时回到待检。
     state = await readState({ bookRoot: root, skipStaleSweep: true });
-    const mtimeSnapshot = await snapshotChapterMtimes(root, state.chapters);
+    const hashSnapshot = await snapshotChapterHashes(root, state.chapters);
     const gateResult = await runGates({ bookRoot: root, ...(o.signal !== undefined ? { signal: o.signal } : {}) });
     const chapterFindings = gateResult.findings.filter((f) => f.chapter === file);
-    await applyGateResult(state, gateResult, { mtimeSnapshot });
+    await applyGateResult(state, gateResult, { hashSnapshot });
     await writeState(state);
     const worst = state.chapters.find((c) => c.chapterNo === o.chapterNo)?.gateStatus?.worst ?? 'clean';
     finalWorst = worst;
@@ -245,8 +272,15 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
         llmCalls += 1;
         if (jr.ok) {
           judgeFindings = jr.findings;
-          const mtimeMs = mtimeSnapshot.get(file) ?? 0;
-          await writeJudgeStatus(root, jr, mtimeMs);
+          const hash = hashSnapshot.get(file) ?? '';
+          await writeJudgeStatus(root, jr, hash);
+          // needsReview（B-13）：判据出了 unsure（人工清单非空）→ 这章要人看。
+          // 由判据结论派生，不单独维护——两处各记一遍必然漂移。
+          const je = state.chapters.find((c) => c.chapterNo === o.chapterNo);
+          if (je !== undefined) {
+            je.needsReview = jr.manual.length > 0;
+            await writeState(state);
+          }
         } else if (jr.kind === 'aborted') {
           rounds.push({ round: roundNo, phase: 'local', findings: 0, worst, action: 'stop-aborted' });
           stopped = 'aborted';
@@ -337,6 +371,7 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
           });
           if (r.applied.length > 0) {
             await atomicWriteText(path.join(root, 'chapters', file), r.text);
+            await bumpCounter('revise');
             continue;
           }
           // 一条都没应用上（引句全没命中 / 空替换 / 超改动量）→ 定点这条路走不通，
@@ -369,6 +404,7 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
       }
       rewriteUsed += 1;
       await atomicWriteText(path.join(root, 'chapters', file), r.text);
+      await bumpCounter('rewrite');
       rounds.push({ round: roundNo, phase: 'rewrite', findings: blocking.length, worst, action: 'rewrite' });
       continue;
     }
@@ -379,6 +415,15 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
       findings: blocking,
       reason: `定点修订 ${maxLocal} 轮 + 整章重写 ${maxRewrite} 轮后，仍有 ${blocking.length} 条拦截级问题`,
     };
+    // needsReview（B-13）：机器改不动了 = 这章必须有人看。这是结论字段，
+    // 不许经 novel state --set 写进来（见 stripConclusions）。
+    {
+      const e = state.chapters.find((c) => c.chapterNo === o.chapterNo);
+      if (e !== undefined && !e.needsReview) {
+        e.needsReview = true;
+        await writeState(state);
+      }
+    }
     rounds.push({
       round: roundNo,
       phase: 'rewrite',

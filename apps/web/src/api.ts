@@ -2,7 +2,8 @@ export interface GateStatus {
   worst: string;
   count: number;
   checkedAt: string;
-  checkedMtimeMs: number;
+  /** v2（B-13）起是内容指纹，不再是 mtime */
+  checkedHash: string;
 }
 
 export interface ChapterEntry {
@@ -10,7 +11,13 @@ export interface ChapterEntry {
   file: string;
   title: string;
   wordCount: number;
+  /** 内容指纹（B-13） */
+  contentHash: string;
   gateStatus: GateStatus | null;
+  /** 需要人工过目（B-13）：判据出了 unsure，或收敛停在 human-needed */
+  needsReview: boolean;
+  reviseCount: number;
+  rewriteCount: number;
 }
 
 export interface StoryState {

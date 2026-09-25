@@ -1,8 +1,9 @@
-import { stat } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Command } from 'commander';
 import {
   DEFAULT_JUDGE_DEFS,
+  contentHash,
   judgeChapter,
   readJudgeDecl,
   readJudgeStatus,
@@ -102,10 +103,10 @@ export function registerJudge(program: Command): void {
 
       let persisted: unknown = null;
       if (opts.write) {
-        const s = await stat(path.join(root, 'chapters', r.file)).catch(() => null);
-        // 与 applyGateResult 同款：回填的 mtime 用**跑后** stat 只在单进程 CLI 里成立；
-        // 这里没有并发写者（judge 是只读判定 + 一次性 CLI），故不引入快照机制。
-        persisted = await writeJudgeStatus(root, r, s?.mtimeMs ?? 0);
+        // 指纹取**判定之后**的当前内容。CLI 是一次性进程、判定期间没有并发写者，
+        // 所以这里不需要 convergeChapter 那套「跑前快照」（那是防多轮循环内的假绿窗口）。
+        const raw = await readFile(path.join(root, 'chapters', r.file), 'utf-8').catch(() => '');
+        persisted = await writeJudgeStatus(root, r, contentHash(raw.replace(/^\uFEFF/, '')));
       }
       process.stdout.write(JSON.stringify({ ...r, persisted }) + '\n');
 

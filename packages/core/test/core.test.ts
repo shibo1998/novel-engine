@@ -18,7 +18,7 @@ test('isRetryable：timeout/5xx 可重试，parse/config/4xx 不可', () => {
   assert.equal(isRetryable({ ok: false, kind: 'parse', detail: '' }), false);
 });
 
-test('summarizeGateResult：权重聚合与 checkedMtimeMs 占位 0', () => {
+test('summarizeGateResult：权重聚合与 checkedHash 占位空串', () => {
   const result: GateResult = {
     gate: 'g',
     book_root: '/x',
@@ -34,7 +34,7 @@ test('summarizeGateResult：权重聚合与 checkedMtimeMs 占位 0', () => {
   assert.equal(m.get('ch-01.md')?.worst, '严重');
   assert.equal(m.get('ch-01.md')?.count, 2);
   assert.equal(m.get('ch-02.md')?.worst, '提示');
-  assert.equal(m.get('ch-01.md')?.checkedMtimeMs, 0);
+  assert.equal(m.get('ch-01.md')?.checkedHash, '', '聚合层拿不到内容，恒为占位空串');
 });
 
 test('readState：从 chapters/ 重建索引（章号/标题/字数）', async () => {

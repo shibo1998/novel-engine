@@ -15,8 +15,16 @@ function Badge({ ch }: { ch: ChapterEntry }): React.JSX.Element {
   const worst = ch.gateStatus?.worst ?? '未检查';
   const color = ch.gateStatus === null ? '#757575' : (WORST_COLOR[worst] ?? '#757575');
   return (
-    <span style={{ display: 'inline-block', minWidth: 56, textAlign: 'center', padding: '2px 8px', borderRadius: 10, fontSize: 12, color: '#fff', background: color }}>
-      {worst}{ch.gateStatus !== null && ch.gateStatus.count > 0 ? ` ${ch.gateStatus.count}` : ''}
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span style={{ display: 'inline-block', minWidth: 56, textAlign: 'center', padding: '2px 8px', borderRadius: 10, fontSize: 12, color: '#fff', background: color }}>
+        {worst}{ch.gateStatus !== null && ch.gateStatus.count > 0 ? ` ${ch.gateStatus.count}` : ''}
+      </span>
+      {/* needsReview（B-13）：判据出了 unsure、或收敛停在 human-needed → 这章要人看。
+          单独一枚标记，不并进 gateStatus——两者来源不同，混在一起就分不清
+          「机器没过」还是「机器判不出来」了。 */}
+      {ch.needsReview ? (
+        <span title="需要人工过目：判据不确定，或机器改不动了" style={{ fontSize: 12, color: '#ef6c00' }}>👁 待人看</span>
+      ) : null}
     </span>
   );
 }

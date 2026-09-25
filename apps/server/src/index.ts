@@ -16,7 +16,7 @@ import {
   readState,
   runGates,
   saveChapterText,
-  snapshotChapterMtimes,
+  snapshotChapterHashes,
   updateChapterSummary,
   writeChapter,
   writeState,
@@ -351,9 +351,9 @@ const server = createServer(async (req, res) => {
           const generation = await convergeChapter({ bookRoot, chapterNo, signal: task.signal });
           // ★顺序不能换（F17）：读 state → 取**跑前** mtime 快照 → 跑 gate → 回填
           const state = await readState({ bookRoot, skipStaleSweep: true });
-          const mtimeSnapshot = await snapshotChapterMtimes(bookRoot, state.chapters);
+          const hashSnapshot = await snapshotChapterHashes(bookRoot, state.chapters);
           const result = await runGates({ bookRoot, signal: task.signal });
-          await applyGateResult(state, result, { mtimeSnapshot });
+          await applyGateResult(state, result, { hashSnapshot });
           await writeState(state);
           send(res, 200, { ...result, state, generation, readiness: publicReadiness(readiness) });
         } catch (e) {
@@ -373,9 +373,9 @@ const server = createServer(async (req, res) => {
           if (body['write'] === true) {
             // ★顺序不能换（F17）：读 state → 取**跑前** mtime 快照 → 跑 gate → 回填
             const state = await readState({ bookRoot, skipStaleSweep: true });
-            const mtimeSnapshot = await snapshotChapterMtimes(bookRoot, state.chapters);
+            const hashSnapshot = await snapshotChapterHashes(bookRoot, state.chapters);
             const result = await runGates({ bookRoot, signal: task.signal });
-            await applyGateResult(state, result, { mtimeSnapshot });
+            await applyGateResult(state, result, { hashSnapshot });
             await writeState(state);
             send(res, 200, { ...result, state });
             return;

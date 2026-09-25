@@ -3,6 +3,7 @@ import path from 'node:path';
 import { readState } from './state.js';
 import { assembleLongContext, CONTEXT_CHAR_CAP } from './summaries.js';
 import { checkChapterReadiness } from './readiness.js';
+import { contentHash } from './hash.js';
 import type { BuildPromptOptions, GateFinding, PromptBundle, RuleRefs } from './types.js';
 
 /** 声明了但磁盘上不存在的规则文件——显式报错，绝不静默跳过（「没生效」和「没写」不能长得一样） */
@@ -290,5 +291,7 @@ export async function buildPrompt(o: BuildPromptOptions): Promise<PromptBundle> 
     ].join('\n');
   }
 
-  return { system, user, ruleRefs };
+  // hash（B-13）：system+user 的内容指纹，写进 ChapterIndexEntry.generatedBy 供质量归因。
+  // 同一版规则 + 同一份上下文 → 同一 hash；换规则或换上下文才会变。
+  return { system, user, ruleRefs, hash: contentHash(`${system}\n\u0000\n${user}`) };
 }

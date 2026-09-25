@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { callLLM } from './llm.js';
+import { contentHash } from './hash.js';
 import type { LLMResult } from './types.js';
 
 /**
@@ -96,8 +96,7 @@ function stripBom(t: string): string {
 }
 
 export function hashText(text: string): string {
-  const norm = stripBom(text).replace(/\r\n/g, '\n');
-  return createHash('sha256').update(norm, 'utf8').digest('hex').slice(0, 16);
+  return contentHash(text);
 }
 
 async function atomicWrite(target: string, text: string): Promise<void> {
