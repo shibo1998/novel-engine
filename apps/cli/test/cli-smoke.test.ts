@@ -321,3 +321,25 @@ test('★B-25：novel lock status/release 可用，且与 core 的锁文件同�
     await rm(path.dirname(root), { recursive: true, force: true });
   }
 });
+
+test('★B-29：novel stats 报北极星；没有改稿数据时明说「没有数据」而不是 0', async () => {
+  const root = await newBook(['--no-plan']);
+  try {
+    await writeFile(path.join(root, 'chapters', 'ch-01.md'), '# 第1章 冒烟\n\n他推开门，风灌进来。\n', 'utf-8');
+    await novel(['state', '--book', root, '--rebuild']);
+
+    const r = await novel(['stats', '--book', root]);
+    assert.equal(r.code, 0, `stats 应成功：\n${r.stderr}`);
+    const s = json<{ chapters: number; human: { feedbackEntries: number; editedLinesPerKilo: number }; judge: { passRate: number | null } }>(r.stdout);
+    assert.equal(s.chapters, 1);
+    assert.equal(s.human.feedbackEntries, 0);
+    // ★「还没有改稿记录」必须与「改了但没动字」形状不同
+    assert.match(r.stderr, /还没有任何改稿记录/);
+    assert.match(r.stderr, /不是 0，是没有数据/);
+    assert.match(r.stderr, /北极星/);
+    assert.equal(s.judge.passRate, null, '一章都没跑判据 → null，不是 0');
+    assert.match(r.stderr, /暂无数据/);
+  } finally {
+    await rm(path.dirname(root), { recursive: true, force: true });
+  }
+});

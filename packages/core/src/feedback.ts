@@ -85,7 +85,7 @@ export async function loadFeedback(
   return opts?.limit !== undefined ? out.slice(-opts.limit) : out;
 }
 
-interface DiffHunk {
+export interface DiffHunk {
   /** 原章起始行（1 基） */
   startLine: number;
   oldLines: string[];
@@ -93,7 +93,7 @@ interface DiffHunk {
 }
 
 /** 行级 LCS diff（机械聚合，不走 LLM——「像素差」原样呈现，提炼规则是人工审阅时的事） */
-function diffLines(oldText: string, newText: string): DiffHunk[] {
+export function diffLines(oldText: string, newText: string): DiffHunk[] {
   const a = oldText.replace(/^﻿/, '').split(/\r?\n/);
   const b = newText.replace(/^﻿/, '').split(/\r?\n/);
   const n = a.length;

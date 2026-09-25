@@ -37,7 +37,10 @@ export { readSummaries, assembleLongContext, updateChapterSummary, proposeStateC
 export type { ChapterSummary, SummaryStore, LongContext } from './summaries.js';
 export { checkChapterReadiness, extractChapterSection, enclosingStageHeading, declaredOutlinePath, OUTLINE_CHAR_CAP } from './readiness.js';
 export type { ChapterReadiness, OutlineScope } from './readiness.js';
-export { recordFeedback, loadFeedback } from './feedback.js';
+export { recordFeedback, loadFeedback, diffLines } from './feedback.js';
+export type { DiffHunk } from './feedback.js';
+export { collectStats, editedLineCount } from './stats.js';
+export type { BookStats, ChapterStats } from './stats.js';
 export { listRuleCandidates, adoptRuleCandidate, RuleAdoptError, CANDIDATE_DIR_REL } from './rules.js';
 export type { RuleCandidate, AdoptOptions, AdoptResult } from './rules.js';
 export type { FeedbackInput } from './feedback.js';
