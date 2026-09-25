@@ -229,23 +229,49 @@ export async function readState(opts: ReadStateOptions): Promise<StoryState> {
 }
 
 /**
- * 写状态。原子写：写 story.json.tmp → rename。
- * 写前归一：chapters 按 chapterNo 升序，generatedAt 刷新。
+ * 归一化：写盘前的唯一形状。
+ *
+ * ★为什么必须是**导出**的函数：`commitState`（B-24）要在写之前算出
+ * 「story.json 将会是什么内容的指纹」，用来判定崩溃后该补完还是回退。
+ * 如果那里自己拼一遍归一逻辑，两边的 `generatedAt` 会各生成一次
+ * （相差毫秒）→ 指纹永远对不上 → **每次 resume 都判成「回退」**。
+ * 这个 bug 在 B-24 的第一版测试里被抓到过。
+ *
+ * `generatedAt` 由调用方决定（`normalizeState` 不刷新它）：
+ * 刷新时间会让「同一份 state 归一两次得到不同结果」，那指纹就没意义了。
  */
-export async function writeState(state: StoryState): Promise<void> {
-  // 入口同样归一（见 readState），且落盘的 bookRoot 用归一后的值，保证跨层字符串相等
+export function normalizeState(state: StoryState, generatedAt?: string): StoryState {
   const root = path.resolve(state.bookRoot);
-  const dir = path.join(root, 'state');
-  await mkdir(dir, { recursive: true });
-  const normalized: StoryState = {
+  return {
     ...state,
     schemaVersion: SCHEMA_VERSION,
     bookRoot: root,
     chapters: [...state.chapters].sort((a, b) => a.chapterNo - b.chapterNo),
-    generatedAt: new Date().toISOString(),
+    generatedAt: generatedAt ?? state.generatedAt,
   };
+}
+
+/** story.json 的**唯一**序列化方式（缩进 2 + 末尾换行）。指纹、比对、写盘全用它。 */
+export function serializeState(state: StoryState): string {
+  return JSON.stringify(normalizeState(state), null, 2) + '\n';
+}
+
+/**
+ * 写状态。原子写：写 story.json.tmp → rename。
+ * 写前归一（见 normalizeState）并刷新 generatedAt。
+ *
+ * `opts.generatedAt` 显式给定时**不再刷新**——两步提交（B-24）要在写之前
+ * 算好「将会写出的内容」的指纹，而刷新时间戳会让算出来的与写出来的差几毫秒，
+ * 指纹永远对不上（那样每次 `resume` 都会误判成「回退」）。
+ */
+export async function writeState(state: StoryState, opts: { generatedAt?: string } = {}): Promise<void> {
+  // 入口同样归一（见 readState），且落盘的 bookRoot 用归一后的值，保证跨层字符串相等
+  const root = path.resolve(state.bookRoot);
+  const dir = path.join(root, 'state');
+  await mkdir(dir, { recursive: true });
+  const text = serializeState({ ...state, generatedAt: opts.generatedAt ?? new Date().toISOString() });
   const tmpPath = path.join(dir, 'story.json.tmp');
-  await writeFile(tmpPath, JSON.stringify(normalized, null, 2) + '\n', 'utf-8');
+  await writeFile(tmpPath, text, 'utf-8');
   await rename(tmpPath, path.join(dir, 'story.json'));
 }
 

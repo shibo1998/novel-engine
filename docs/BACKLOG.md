@@ -50,7 +50,6 @@
 
 | # | 内容 | 来源 | 暂缓原因 | 依赖 |
 |---|---|---|---|---|
-| B-24 | 两步提交 + 快照型 checkpoint + resume + rollback | v0.2 M4.4–4.6 | — | B-13 |
 | B-25 | 文件锁（pid + 时间戳，陈旧锁可接管） | v0.2 M4.7 | — | — |
 | B-26 | `replayLLM` 录像回放，离线确定性测试 | v0.2 M7.6、X6 | — | — |
 | B-27 | 成本统计与预算上限（单章/全书），超限停下 | v0.2 M7.7、X1 | — | — |
@@ -109,6 +108,7 @@
 | B-61 | 文档写明「`PUT /chapter` 刻意不设闸门」——README 关键边界 + 架构契约决策记录（不写下来日后必被当漏洞「修」） | 2026-09-25 · 0ea2b10 |
 | B-56 | legacy 手册归档到 `docs/legacy/`（`docs/legacy-README.md` → `docs/legacy/README.md`，同 SKILL） | 2026-09-25 · 见下 |
 | B-55 | `content/` 清理**清单**已出（`docs/28-content清理清单.md`）：建议删 `oc-kaleidos`+`oc-kosmos`（642K）+`weekly-meme-report`（44K）；`wuhang-*` 列出但**不建议删**（与 `plan`/`write` 功能重叠属 B-54）。★**未删任何文件，等作者确认** | 2026-09-25 · 见下 |
+| B-24 | 两步提交 + 快照 checkpoint + resume + rollback：`state/checkpoints/cp-NNNN.json`（含 story.json 完整快照 + 章文件指纹）+ `state/run.pendingCommit`（记**目标指纹**）+ `state/journal.jsonl`（追加式流水）。★`resume` 按目标指纹判定**补完/回退**；★`restoreFrom` 对**来历不明**的 state 拒绝覆盖（需 `--force`）；★`rollback` **不改正文**（列出来交给书仓 git）；保留策略「最近 50 份 + 每卷末 1 份」 | 2026-09-25 · 见下 |
 | B-51 | `novel commit` + 可选自动提交：提交信息含章号（X5）；**不 push**（对外动作工具不做）；★不是 git 仓库 / 树干净 / 提交失败三种都返回 `committed:false` **且带原因**，绝不静默成功。`book.json` 的 `git.autoCommit` 默认 **false**（git 历史是作者的东西），开了才在收敛终态提交一次 | 2026-09-25 · 见下 |
 | B-52 | 章号编号：新增 `naming.ts`（**宽度只在这里算**）；**读**兼容四位/两位/无填充（存量书是两位的，只认四位会让它们一个文件都读不到）；**写**仍用两位避免混合命名；`novel migrate-numbering` **默认 dry-run** | 2026-09-25 · 见下 |
 | B-49 | 人物口吻字段（`voice.catchphrases` / `speechStyle`）：抽取时一并抽出（**抽不到就留空，不许编**），并由 J3 的参考材料注入——这是「口吻漂移」唯一可判据的来源（词面禁用词表做不到） | 2026-09-25 · 见下 |
@@ -126,6 +126,6 @@
 > 随 B-01/B-02 一并修掉的基建缺陷：`packages/core` 的 `test` 脚本是**硬编码文件清单**，
 > 新增的 `test/memory-context.test.ts` 没被登记 → 实际只跑 55 项，B-01/B-02 的 4 项测试
 > 从未执行过。已改为 `"test/**/*.test.ts"`。（此类「测试在但不跑」的坑与 B-15「测试基建」
-> 同类，登记为教训。）当前全量：core 179 + cli 16 = **195 项全绿，0 跳过**
+> 同类，登记为教训。）当前全量：core 193 + cli 17 = **210 项全绿，0 跳过**
 > （gates 检查器固件已增至 **19 项**，覆盖 4 个检查器）
 > （另含 gates 检查器的 9 项 Python 固件，经 `gates-python.test.ts` 一并跑）。

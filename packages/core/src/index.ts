@@ -7,9 +7,32 @@ export { runGates, GateFailureError, parseGateError, assertNoResultOnFailure } f
 export type { RunGatesOptions } from './gates.js';
 export { runStyleGate, assertStyleReady, StyleNotReadyError, STYLE_GATE } from './style.js';
 export type { StyleGateReport, RunStyleGateOptions } from './style.js';
-export { readState, writeState, summarizeGateResult, applyGateResult, snapshotChapterHashes, stripConclusions, isPassingWorst, BLOCKING_SEVERITIES, SCHEMA_VERSION } from './state.js';
+export { readState, writeState, normalizeState, serializeState, summarizeGateResult, applyGateResult, snapshotChapterHashes, stripConclusions, isPassingWorst, BLOCKING_SEVERITIES, SCHEMA_VERSION } from './state.js';
 export { contentHash } from './hash.js';
 export { commitBook, isGitRepo, autoCommitEnabled } from './bookgit.js';
+export {
+  commitState,
+  resume,
+  restoreFrom,
+  rollback,
+  pruneCheckpoints,
+  listCheckpoints,
+  readCheckpoint,
+  readPendingCommit,
+  readJournal,
+  RestoreRefused,
+} from './checkpoint.js';
+export type {
+  Checkpoint,
+  CheckpointMeta,
+  PendingCommit,
+  CommitOptions,
+  CommitOutcome,
+  ResumeReport,
+  RollbackReport,
+  PruneReport,
+  JournalEntry,
+} from './checkpoint.js';
 export type { CommitResult, CommitBookOptions } from './bookgit.js';
 export {
   chapterFileName,

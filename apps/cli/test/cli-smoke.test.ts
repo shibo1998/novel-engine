@@ -438,3 +438,43 @@ test('★B-22/B-23：novel foreshadow / lookup 接在 CLI 上，空库时都明�
     await rm(path.dirname(root), { recursive: true, force: true });
   }
 });
+
+test('★B-24：novel checkpoint list/commit/resume/rollback 接在 CLI 上', async () => {
+  const root = await newBook(['--no-plan']);
+  try {
+    await writeFile(path.join(root, 'chapters', 'ch-01.md'), '# 第1章 冒烟\n\n他推开门。\n', 'utf-8');
+    await novel(['state', '--book', root, '--rebuild']);
+
+    // 还没建过 → 明确说没有
+    const l0 = await novel(['checkpoint', 'list', '--book', root]);
+    assert.equal(l0.code, 0);
+    assert.equal(json<{ checkpoints: unknown[] }>(l0.stdout).checkpoints.length, 0);
+    assert.match(l0.stderr, /还没有任何 checkpoint/);
+
+    // 手动建一份
+    const c = await novel(['checkpoint', 'commit', '--book', root, '--reason', '测试回退点']);
+    assert.equal(c.code, 0, `建 checkpoint 应成功：\n${c.stderr}`);
+    assert.equal(json<{ id: string }>(c.stdout).id, 'cp-0001');
+
+    // resume：没有未完成的提交
+    const rs = await novel(['checkpoint', 'resume', '--book', root]);
+    assert.equal(json<{ action: string }>(rs.stdout).action, 'none');
+
+    // journal 要能看到刚那次提交
+    const j = await novel(['checkpoint', 'journal', '--book', root]);
+    assert.equal(json<{ total: number }>(j.stdout).total, 1);
+    assert.match(j.stderr, /commit/);
+
+    // rollback：正文没改 → 明说「无需回退正文」
+    const rb = await novel(['checkpoint', 'rollback', '--book', root, '--id', 'cp-0001']);
+    assert.equal(rb.code, 0);
+    assert.match(rb.stderr, /无需回退正文/);
+
+    // 未知 id → 退出码 2，列出候选
+    const bad = await novel(['checkpoint', 'restore', '--book', root, '--id', 'cp-9999']);
+    assert.equal(bad.code, 2);
+    assert.match(bad.stderr, /现有：cp-0001/);
+  } finally {
+    await rm(path.dirname(root), { recursive: true, force: true });
+  }
+});

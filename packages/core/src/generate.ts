@@ -8,6 +8,7 @@ import { judgeChapter, JudgesNotDeclared, writeJudgeStatus } from './judges.js';
 import { readReviseConfig, reviseByQuote } from './revise.js';
 import { withBookLock } from './lock.js';
 import { autoCommitEnabled, commitBook } from './bookgit.js';
+import { commitState } from './checkpoint.js';
 import type { GateFinding, LLMResult } from './types.js';
 
 /**
@@ -166,6 +167,8 @@ export interface ConvergeResult {
   judge: 'on' | 'off' | 'not-declared';
   /** 自动提交结果（B-51）。**没开 autoCommit 时不存在**——「没开」与「开了但没提交」形状不同 */
   commit?: { committed: boolean; hash?: string; skippedReason?: string };
+  /** 本次收敛建出的 checkpoint id（B-24）。**没建出来时不存在**——不假装有回退点 */
+  checkpointId?: string;
   /**
    * 本次实际发出的 LLM 请求次数上限（F15）。
    * 暴露它是为了让「重试层数 × 轮数」这个乘积**可被审计**：
@@ -540,6 +543,19 @@ async function convergeChapterLocked(o: ConvergeOptions): Promise<ConvergeResult
     break;
   }
 
+  // 每章一个**进程内**的可回退点（B-24）：两步提交 + 快照。
+  // 只在终态建一份——收敛过程中的每一轮都建会把 checkpoints/ 撑爆，
+  // 而中间态本来就不是有意义的回退点（它连自己都还没稳定）。
+  let checkpointId: string | undefined;
+  try {
+    const c = await commitState({ bookRoot: root, reason: `第 ${o.chapterNo} 章收敛结束（${stopped}）` });
+    checkpointId = c.checkpoint.id;
+  } catch {
+    // checkpoint 建不出来不该让整章白跑——正文与 state 已经落盘了。
+    // 但要**如实反映**：返回值里没有 checkpointId 就是「没建」。
+    checkpointId = undefined;
+  }
+
   // 每章一个可回退点（B-51）：**默认关**，要开就 book.json 里写 git.autoCommit: true。
   // git 历史是作者的东西，工具不替他决定要不要留痕。
   // 只在**终态**提交一次——收敛过程中的中间态提交只会把 log 弄脏。
@@ -556,6 +572,7 @@ async function convergeChapterLocked(o: ConvergeOptions): Promise<ConvergeResult
     rounds,
     finalWorst,
     ...(commit !== undefined ? { commit } : {}),
+    ...(checkpointId !== undefined ? { checkpointId } : {}),
     stopped: assertStoppedConsistent(stopped, finalWorst),
     ...(handoff !== undefined ? { handoff } : {}),
     judge: judgeState,
