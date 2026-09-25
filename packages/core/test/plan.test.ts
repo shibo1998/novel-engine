@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   PlanNotReadyError,
+  draftLayer,
+  resetLlmBreaker,
   assertPlanReady,
   checkPlanGate,
   confirmLayer,
@@ -294,6 +297,112 @@ test('★B-58：book.json 坏掉时 premise.md 仍要落盘（真相源不陪葬
     const text = await readFile(path.join(root, 'book/premise.md'), 'utf-8');
     assert.ok(text.includes('## 一句话故事'), 'premise.md 是真相源，book.json 坏不该连带它一起失败');
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// ── B-70：plan draft 的确定性测试（靠 B-26 的录像回放）──────────────────────
+//
+// 这一段此前**完全没测过**：`draftLayer` 会拼一大段上游材料喂给模型，
+// 但「拼了什么、拿到什么、写到哪」这条链路一次都没跑过。
+// 有了回放才谈得上确定性测试——否则每跑一次都要真调模型。
+
+test('★B-70：draftLayer 全链路（拼上游材料→调用→落 state/drafts/）可确定性复现', async () => {
+  const root = await makeBook();
+  const recDir = await mkdtemp(path.join(tmpdir(), 'novel-plandraftrec-'));
+  let requests = 0;
+  let lastUser = '';
+  const DRAFT = '# 正典速查表\n\n## 境界\n炼气→筑基→金丹。\n';
+  const srv = createServer((req, res) => {
+    requests += 1;
+    let body = '';
+    req.on('data', (d) => { body += d; });
+    req.on('end', () => {
+      try {
+        lastUser = (JSON.parse(body) as { messages?: { role: string; content: string }[] })
+          .messages?.find((m) => m.role === 'user')?.content ?? '';
+      } catch { /* 只用于断言，解析失败不影响被测逻辑 */ }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: DRAFT } }] }));
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+  const addr = srv.address();
+  const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
+
+  const saved = { ...process.env };
+  const restore = (): void => {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+    resetLlmBreaker();
+  };
+  try {
+    // 定位层先确认——起草设定层的前置条件
+    await initPlan(root);
+    await writePosition(root, FULL_ANSWERS);
+    await confirmLayer(root, 'position');
+
+    // ① 录像
+    Object.assign(process.env, {
+      LLM_BASE_URL: `http://127.0.0.1:${port}`, LLM_API_KEY: 'k', LLM_MODEL: 'm',
+      NOVEL_LLM_RETRY_ATTEMPTS: '0', NOVEL_LLM_RECORD_DIR: recDir,
+    });
+    delete process.env['NOVEL_LLM_REPLAY_DIR'];
+    resetLlmBreaker();
+    const live = await draftLayer(root, 'setting');
+    assert.equal(live.ok, true, `首次起草应成功：${JSON.stringify(live)}`);
+    assert.equal(requests, 1);
+
+    // 起草只写 state/drafts/，**绝不碰正式文件**——这是 plan.ts 的第一条纪律。
+    // 落盘内容是 r.text.trim() + '\n'；DRAFT 本身以 \n 结尾 → trim 掉再加回，结果即 DRAFT
+    if (live.ok) assert.equal(live.draftFile, 'state/drafts/setting.md');
+    assert.equal(await readFile(path.join(root, 'state', 'drafts', 'setting.md'), 'utf-8'), DRAFT);
+    assert.equal(
+      await readFile(path.join(root, layerFile('setting')), 'utf-8').catch(() => null),
+      null,
+      '★正式文件 setting 不许被起草碰——LLM 只写派生稿',
+    );
+
+    // 上游材料真的拼进去了（否则模型无从下手）
+    assert.ok(lastUser.includes('故事定位'), 'user prompt 里要有定位层');
+    assert.ok(lastUser.includes(FULL_ANSWERS['logline'] ?? ''), '要有定位的具体内容');
+
+    // ② 回放：不碰网络、不需要密钥，写出的草稿逐字一致
+    Object.assign(process.env, { NOVEL_LLM_RECORD_DIR: undefined, NOVEL_LLM_REPLAY_DIR: recDir });
+    delete process.env['NOVEL_LLM_RECORD_DIR'];
+    delete process.env['LLM_BASE_URL'];
+    delete process.env['LLM_API_KEY'];
+    resetLlmBreaker();
+    await rm(path.join(root, 'state', 'drafts', 'setting.md'));
+    const replay = await draftLayer(root, 'setting');
+    assert.equal(replay.ok, true, '回放应成功');
+    assert.equal(requests, 1, '★回放不该产生任何网络请求');
+    assert.equal(await readFile(path.join(root, 'state', 'drafts', 'setting.md'), 'utf-8'), DRAFT);
+  } finally {
+    restore();
+    srv.close();
+    await rm(recDir, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('draftLayer：上游未确认 → 拒绝起草，且**不调模型**（前置闸门在调用之前）', async () => {
+  const root = await makeBook();
+  const saved = { ...process.env };
+  try {
+    await initPlan(root);
+    await writePosition(root, FULL_ANSWERS);
+    // position 还没确认
+    delete process.env['LLM_BASE_URL'];
+    delete process.env['LLM_API_KEY'];
+    delete process.env['LLM_MODEL'];
+    await assert.rejects(
+      () => draftLayer(root, 'setting'),
+      (e: unknown) => /上游层「position」未确认/.test(String(e)),
+      '★若先调模型再检查前置，这里报的会是「环境变量缺失」——顺序错了',
+    );
+  } finally {
+    Object.assign(process.env, saved);
     await rm(root, { recursive: true, force: true });
   }
 });
