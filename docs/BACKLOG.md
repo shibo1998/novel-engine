@@ -5,9 +5,17 @@
 
 ## 进行中
 
-| # | 内容 | 来源 | 当前进度 |
+（空）
+
+## 由 B-10 拆出的后续项
+
+| # | 内容 | 暂缓原因 | 依赖 |
 |---|---|---|---|
-| B-10 | 逐层递进建书（定位问答 → 设定 → 总纲 → 卷纲 → 细纲）+ 每层确认闸门 | v0.2 M8.0 | `packages/core/src/plan.ts` 已写（352 行：hash 确认/stale 判定/`checkPlanGate`/`draftLayer`），但**无 CLI 接线、无测试**，`checkPlanGate` 也未接进 write 流程；工作区未提交 |
+| B-58 | 定位层同步 `book.json` 的 `book` 段（v0.2 M8.0 表格写明产物 = `book.json` 的 book 段 **+** `book/premise.md`） | 当前只写 `premise.md`；`book` 段（题材/平台/读者）仍要手改 book.json，与「定位问答一次问全」有落差 | — |
+| B-59 | `plan draft`（LLM 起草各层）的确定性测试 | 需录制回放，否则每跑一次都要真调模型 | B-26 |
+| B-60 | `novel init` 一并建 `plan.json`（或加 `--plan` 开关） | 现在新书要额外跑 `novel plan init` 才进逐层流程，两步容易漏；但存量书重跑 init 会被拒，需先想清迁移 | — |
+| B-61 | 文档写明「`PUT /chapter`（人工改稿）**刻意**不设闸门」 | 不写下来，日后会被当成漏接的漏洞来「修」，反而挡掉作者的正常改稿 | — |
+| B-62 | `preflight` 在风格闸门**抛错**时（如 book.json 结构非法）不输出任何 JSON | 既有行为：`Promise.all` 里 runStyleGate 抛错 → 整个 action 抛出，脚本/面板拿不到 planGate；已咬到本次冒烟验证 | — |
 
 ## 由 B-01/B-02 拆出的后续项
 
@@ -84,8 +92,9 @@
 |---|---|---|
 | B-01 | 当前状态卡：`buildPrompt` draft 模式追加 `now.md`（读 `book.json` 的 `paths.now`，缺省 `.soloent/memory/now.md`；上限 3000 码点；文件缺失或仍是「（待填）」占位则不注入）；`summarize --state-card` 产出建议到 `state/now.proposed.md`，**绝不覆盖 `now.md`**，作者手工合并 | 2026-09-25 · 6ba2813 |
 | B-02 | 相关摘要检索关键词 = 上一章末尾 ∪ 本章细纲全文 bigram（`assembleLongContext` 第 4 参 `outlineText`） | 2026-09-25 · 6ba2813 |
+| B-10 | 逐层递进建书（定位 → 设定 → 总纲 → 卷纲 → 细纲）+ 每层确认闸门；`novel plan init/status/position/draft/confirm`；`assertPlanReady` 接进 generate/book/CLI write/server `/write`·`/generate`·`/preflight`。顺带修掉 CLI `novel write` **一道门都没有**的旁路。未开启逐层流程的书恒为就绪（旧书不连坐） | 2026-09-25 · a73bd75 |
 
 > 随 B-01/B-02 一并修掉的基建缺陷：`packages/core` 的 `test` 脚本是**硬编码文件清单**，
 > 新增的 `test/memory-context.test.ts` 没被登记 → 实际只跑 55 项，B-01/B-02 的 4 项测试
-> 从未执行过。已改为 `"test/**/*.test.ts"`，现 59 项全绿。（此类「测试在但不跑」的坑
-> 与 B-15「测试基建」同类，登记为教训。）
+> 从未执行过。已改为 `"test/**/*.test.ts"`。（此类「测试在但不跑」的坑与 B-15「测试基建」
+> 同类，登记为教训。）当前全量：**71 项全绿**。
