@@ -64,7 +64,7 @@
 |---|---|---|
 | B-45 | Web：时间轴/阅读器/人工介入清单/Findings 跳转、虚拟滚动、SSE 降级 | v0.2 §8 |
 | B-53 | Python 检查器逐个迁移到 TS | docs/24 P1-3 |
-| B-54 | 收拢三套系统：停用 webnovel-writer 插件钩子、合并 STORY_RULES 重复条目 | docs/24 P1-1 |
+| B-54 | **已裁定**（docs/29）：novel-engine 为唯一真相源；wuhang 按阶段分工——保留 1-边界确定与 2-创意与设定（novel-engine 无对等能力），**3-大纲/4-正文/5-审查停用**（产出不进 state，闸门/判据/反查全看不见）。三步执行法待确认 | docs/23 §3.1、docs/24 P1-1、docs/29 |
 | B-57 | 研究参考项目：Word Compiler（三环上下文）、SAGA、StoryWriter、DeepWriter-Bench | 调研 docx |
 
 ## 明确不做（留档防重复讨论）
