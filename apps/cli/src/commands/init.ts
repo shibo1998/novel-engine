@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Command } from 'commander';
+import { initPlan } from '@novel/core';
 
 /**
  * 随插件分发的模板根。
@@ -83,7 +84,12 @@ export function registerInit(program: Command): void {
     .requiredOption('--title <title>', '书名')
     .option('--genre <genre>', '题材', '')
     .option('--platform <platform>', '平台', '')
-    .action(async (opts: { dir: string; title: string; genre: string; platform: string }) => {
+    // B-60：默认一并开启逐层流程。为什么默认开——「逐层递进、层层确认」是作者
+    // 2026-09-25 确认的第一条原则；新书若还要额外跑一次 `novel plan init`，
+    // 那一步一定会漏，漏了的后果是逐层闸门静默失效（又是「守卫在但没接上」）。
+    // 存量书不受影响：init 拒绝非空目录，跑不到这里。
+    .option('--no-plan', '不开启逐层流程（跳过 plan.json；不进「定位→设定→总纲→卷纲→细纲」闸门）')
+    .action(async (opts: { dir: string; title: string; genre: string; platform: string; plan: boolean }) => {
       const root = path.resolve(opts.dir);
       const existing = await readdir(root).catch(() => null);
       if (existing !== null && existing.length > 0) {
@@ -153,8 +159,15 @@ export function registerInit(program: Command): void {
         written.push(doc.rel);
       }
 
+      // 逐层流程：建 plan.json（形状由 core 的 initPlan 负责，不在这里再抄一份）
+      let planCreated = false;
+      if (opts.plan) {
+        await initPlan(root);
+        planCreated = true;
+      }
+
       process.stdout.write(
-        JSON.stringify({ ok: true, bookRoot: root, styleDocsWritten: written }) + '\n',
+        JSON.stringify({ ok: true, bookRoot: root, styleDocsWritten: written, planCreated }) + '\n',
       );
     });
 }

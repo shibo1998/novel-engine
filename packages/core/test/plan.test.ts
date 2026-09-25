@@ -249,3 +249,51 @@ test('plan.json 的 schemaVersion 不认识 → 明确报错，不静默当空',
     await rm(root, { recursive: true, force: true });
   }
 });
+
+// ── B-58：定位层同步 book.json 的 book 段 ──────────────────────────────────
+
+test('★B-58：定位答案写进 book 段的映射键；原有键不丢；可选题留空不覆盖', async () => {
+  const root = await makeBook();
+  try {
+    await initPlan(root);
+    await writePosition(root, { ...FULL_ANSWERS, reader: '男频爽文', tone: '热血短句' });
+    const cfg = JSON.parse(await readFile(path.join(root, '.soloent', 'book.json'), 'utf-8')) as {
+      book: Record<string, string>;
+    };
+    assert.equal(cfg.book['genre'], '玄幻-高武', 'genre 要被问答覆盖（初始值是「玄幻」）');
+    assert.equal(cfg.book['audience'], '男频爽文', 'reader → book.audience');
+    assert.equal(cfg.book['tone'], '热血短句');
+    assert.equal(cfg.book['title'], '测试书', '原有键不许被冲掉');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('★B-58：不认识的答案 id 不写进 book 段（问答表以后加题不会误塞）', async () => {
+  const root = await makeBook();
+  try {
+    await initPlan(root);
+    await writePosition(root, { ...FULL_ANSWERS, 未来才有的题: '值' });
+    const cfg = JSON.parse(await readFile(path.join(root, '.soloent', 'book.json'), 'utf-8')) as {
+      book: Record<string, string>;
+    };
+    assert.equal('未来才有的题' in cfg.book, false, '映射表外的 id 一律不写——否则 book 段会被问答表牵着走');
+    assert.equal(cfg.book['title'], '测试书');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('★B-58：book.json 坏掉时 premise.md 仍要落盘（真相源不陪葬）', async () => {
+  const root = await makeBook();
+  try {
+    await initPlan(root);
+    await write(root, '.soloent/book.json', '{ 这不是合法 JSON');
+    const rel = await writePosition(root, FULL_ANSWERS);
+    assert.equal(rel, 'book/premise.md');
+    const text = await readFile(path.join(root, 'book/premise.md'), 'utf-8');
+    assert.ok(text.includes('## 一句话故事'), 'premise.md 是真相源，book.json 坏不该连带它一起失败');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

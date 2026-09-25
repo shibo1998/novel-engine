@@ -46,16 +46,17 @@ function novel(args: string[], env: NodeJS.ProcessEnv = {}): Promise<RunResult> 
   });
 }
 
-/** 用 CLI 自己开一本新书（顺带冒烟 init 命令本身） */
-async function newBook(): Promise<string> {
+/** 用 CLI 自己开一本新书（顺带冒烟 init 命令本身）。extra 可传 `--no-plan` 走旧书路径。 */
+async function newBook(extra: string[] = []): Promise<string> {
   const parent = await mkdtemp(path.join(tmpdir(), 'novel-cli-'));
   const root = path.join(parent, '书');
-  const r = await novel(['init', '--dir', root, '--title', '冒烟书', '--genre', '玄幻', '--platform', '番茄']);
+  const r = await novel(['init', '--dir', root, '--title', '冒烟书', '--genre', '玄幻', '--platform', '番茄', ...extra]);
   assert.equal(r.code, 0, `init 应成功：\n${r.stderr}`);
   return root;
 }
 
-const json = <T>(s: string): T => JSON.parse(s) as T;
+/** CLI 输出与 book.json 都可能带 BOM（init 刻意写的），解析前统一剥掉 */
+const json = <T>(s: string): T => JSON.parse(s.replace(/^\uFEFF/, '')) as T;
 
 // ── 接线是否真的生效 ──────────────────────────────────────────────────────
 
@@ -113,14 +114,53 @@ test('★novel write 也有前置闸门（B-10 修掉的旁路）：风格层没
   }
 });
 
-test('preflight：未就绪 → 非 0，且 stdout 里能看到是哪一道门', async () => {
+test('★B-60：init 默认开启逐层流程 → preflight 两道门都在，且都报未就绪', async () => {
   const root = await newBook();
   try {
     const r = await novel(['preflight', '--book', root, '--chapter', '1']);
     assert.notEqual(r.code, 0);
-    const payload = json<{ styleGate: { ready: boolean }; planGate: { enabled: boolean } }>(r.stdout);
+    const payload = json<{ styleGate: { ready: boolean }; planGate: { enabled: boolean; ready: boolean; blocking: string[] } }>(r.stdout);
     assert.equal(payload.styleGate.ready, false, '三份风格文件没填 → 不就绪');
-    assert.equal(payload.planGate.enabled, false, '没建 plan.json 的书：逐层闸门不启用（旧书不连坐）');
+    assert.equal(payload.planGate.enabled, true, '★init 应一并建 plan.json——否则「多跑一次 plan init」那步一定会漏');
+    assert.equal(payload.planGate.ready, false, '五层都没确认 → 逐层闸门拦住');
+    assert.ok(payload.planGate.blocking.some((b) => b.includes('定位')), '要指出卡在第一层');
+  } finally {
+    await rm(path.dirname(root), { recursive: true, force: true });
+  }
+});
+
+test('init --no-plan：走旧书路径——不建 plan.json，逐层闸门不启用（不连坐）', async () => {
+  const root = await newBook(['--no-plan']);
+  try {
+    const r = await novel(['preflight', '--book', root, '--chapter', '1']);
+    const payload = json<{ planGate: { enabled: boolean; ready: boolean } }>(r.stdout);
+    assert.equal(payload.planGate.enabled, false, '--no-plan 的书不该被逐层闸门管');
+    assert.equal(payload.planGate.ready, true, '不启用 = 恒就绪');
+  } finally {
+    await rm(path.dirname(root), { recursive: true, force: true });
+  }
+});
+
+test('★B-58：定位问答要同步进 book.json 的 book 段，不只写 premise.md', async () => {
+  const root = await newBook(['--no-plan']);
+  try {
+    const r = await novel(['plan', 'position', '--book', root,
+      '--answer', 'genre=玄幻-高武', '--answer', 'platform=番茄', '--answer', 'reader=男频爽文',
+      '--answer', 'logline=落魄少年靠加点系统向上', '--answer', 'protagonist=林青，寒门',
+      '--answer', 'cheat=加点系统', '--answer', 'tone=热血短句',
+      '--answer', 'selling=打脸升级', '--answer', 'scale=200万字10卷', '--answer', 'ending=登临绝顶',
+    ]);
+    assert.equal(r.code, 0, `定位应成功：\n${r.stderr}`);
+
+    const cfg = json<{ book: Record<string, string> }>(await readFile(path.join(root, '.soloent', 'book.json'), 'utf-8'));
+    assert.equal(cfg.book['genre'], '玄幻-高武', '★genre 要被问答覆盖（init 时传的是「玄幻」）');
+    assert.equal(cfg.book['platform'], '番茄');
+    assert.equal(cfg.book['audience'], '男频爽文', '目标读者要落到 book 段');
+    assert.equal(cfg.book['tone'], '热血短句');
+    assert.equal(cfg.book['title'], '冒烟书', '原有键不许被冲掉');
+    // 真相源仍是 premise.md
+    const premise = await readFile(path.join(root, 'book', 'premise.md'), 'utf-8');
+    assert.ok(premise.includes('落魄少年靠加点系统向上'));
   } finally {
     await rm(path.dirname(root), { recursive: true, force: true });
   }

@@ -139,7 +139,57 @@ export async function initPlan(bookRoot: string): Promise<PlanFile> {
   return plan;
 }
 
-/** 把定位问答写成 premise.md（正式文件；由问答直接产生，不经 LLM） */
+/**
+ * 定位问答 → `book.json` 的 `book` 段（B-58）。
+ *
+ * 为什么必须同步：v0.2 M8.0 的表格写明定位层的产物是
+ * **`book.json` 的 book 段 + `book/premise.md`** 两样。只写 premise.md 的话，
+ * 「题材/平台/目标读者」这些被问过一遍的东西仍要作者手改 book.json——
+ * 问答的意义（一次问全、只填一处）就没了，而且两处会漂移。
+ *
+ * 值取「题目 id → book 段键名」。**不认识的 id 不写**（问答表以后加题不会误塞进 book 段）。
+ */
+const POSITION_TO_BOOK_META: Record<string, string> = {
+  genre: 'genre',
+  platform: 'platform',
+  reader: 'audience',
+  tone: 'tone',
+  selling: 'sellingPoint',
+  scale: 'scale',
+  ending: 'ending',
+};
+
+/**
+ * 把定位答案同步进 book.json 的 book 段。
+ * 保留原有键与 BOM；文件不存在/坏 → 跳过（premise.md 已落盘，不该因为 book.json 坏就整体失败）。
+ * 返回写进去的键名，供 CLI 如实报告。
+ */
+async function syncBookMeta(root: string, answers: Record<string, string>): Promise<string[]> {
+  const cfgPath = path.join(root, '.soloent', 'book.json');
+  const raw = await readFile(cfgPath, 'utf-8').catch(() => null);
+  if (raw === null) return [];
+  let cfg: Record<string, unknown>;
+  try {
+    cfg = JSON.parse(stripBom(raw)) as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+  const hadBom = raw.startsWith('\uFEFF');
+  const book = { ...((cfg['book'] ?? {}) as Record<string, unknown>) };
+  const written: string[] = [];
+  for (const [id, key] of Object.entries(POSITION_TO_BOOK_META)) {
+    const v = (answers[id] ?? '').trim();
+    if (v === '') continue;
+    book[key] = v;
+    written.push(key);
+  }
+  if (written.length === 0) return [];
+  cfg['book'] = book;
+  await atomicWrite(cfgPath, (hadBom ? '\uFEFF' : '') + JSON.stringify(cfg, null, 2) + '\n');
+  return written;
+}
+
+/** 把定位问答写成 premise.md（正式文件；由问答直接产生，不经 LLM），并同步 book.json 的 book 段 */
 export async function writePosition(bookRoot: string, answers: Record<string, string>): Promise<string> {
   const root = path.resolve(bookRoot);
   const missing = POSITION_QUESTIONS
@@ -153,6 +203,9 @@ export async function writePosition(bookRoot: string, answers: Record<string, st
   }
   const rel = layerFile('position');
   await atomicWrite(path.join(root, rel), lines.join('\n'));
+  // 先落 premise.md 再同步 book 段：premise.md 是**真相源**，
+  // book 段是它的投影。反过来的话，book.json 坏掉会连 premise.md 都写不出来。
+  await syncBookMeta(root, answers);
   return rel;
 }
 
