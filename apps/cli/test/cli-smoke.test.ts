@@ -608,3 +608,26 @@ test('★commander 自身的报错也要走退出码契约（缺必填项/未知
   assert.equal((await novel(['arbiter', '--help'])).code, 0, '子命令 --help 必须 0');
   assert.equal((await novel(['--version'])).code, 0, '--version 必须 0');
 });
+
+test('★B-31：novel eval 空评测集/未声明判据时明确报错，不返回空报告', async () => {
+  const root = await newBook(['--no-plan']);
+  try {
+    // 未声明判据 → 评测无从跑起
+    const noJudges = await novel(['eval', '--book', root]);
+    assert.equal(noJudges.code, 2);
+    assert.match(noJudges.stderr, /未声明任何判据/);
+    assert.match(noJudges.stderr, /--scaffold/, '要给出下一步');
+
+    // 声明判据后：评测集为空 → 报错并给出结构说明
+    const cfgPath = path.join(root, '.soloent', 'book.json');
+    const cfg = json<Record<string, unknown>>(await readFile(cfgPath, 'utf-8'));
+    cfg['judges'] = { enabled: ['j3-continuity'] };
+    await writeFile(cfgPath, JSON.stringify(cfg), 'utf-8');
+    const emptySet = await novel(['eval', '--book', root]);
+    assert.equal(emptySet.code, 2);
+    assert.match(emptySet.stderr, /评测集是空的/);
+    assert.match(emptySet.stderr, /expect\.json/, '要给出结构说明');
+  } finally {
+    await rm(path.dirname(root), { recursive: true, force: true });
+  }
+});

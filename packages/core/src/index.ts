@@ -76,6 +76,8 @@ export type { DiffHunk } from './feedback.js';
 export { collectStats, editedLineCount } from './stats.js';
 export { buildWrapUpReport } from './wrapup.js';
 export { buildStyleAnchor } from './style-anchor.js';
+export { runEvalSet, loadEvalSet, EvalError } from './eval.js';
+export type { EvalCase, EvalCaseResult, EvalReport, RunEvalOptions } from './eval.js';
 export {
   ARBITER_KINDS,
   ARBITER_SAMPLES,

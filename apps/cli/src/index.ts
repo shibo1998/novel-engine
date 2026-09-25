@@ -26,6 +26,7 @@ import { registerImpact } from './commands/impact.js';
 import { registerStyleAnchor } from './commands/style-anchor.js';
 import { registerPlanner } from './commands/planner.js';
 import { registerArbiter } from './commands/arbiter.js';
+import { registerEval } from './commands/eval.js';
 
 program.name('novel').description('novel-engine 命令行外壳').version('0.0.0');
 
@@ -55,6 +56,7 @@ registerImpact(program);
 registerStyleAnchor(program);
 registerPlanner(program);
 registerArbiter(program);
+registerEval(program);
 
 /**
  * ★`exitOverride`：让 commander 的**自身报错也走我们的 catch**。
