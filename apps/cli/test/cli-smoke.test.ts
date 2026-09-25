@@ -247,3 +247,46 @@ test('★B-62：风格闸门**抛错**时 preflight 仍要吐 JSON，且与「�
     await rm(parent, { recursive: true, force: true });
   }
 });
+
+test('★B-28：rules candidates / adopt 真的接在 CLI 上，且拒绝未改写的候选', async () => {
+  const root = await newBook(['--no-plan']);
+  try {
+    const candDir = path.join(root, '.soloent', 'rules', '_candidates');
+    await mkdir(candDir, { recursive: true });
+    const raw = path.join(candDir, '2026-09-25-ch-01.md');
+    await writeFile(raw, [
+      '# 规则候选 · 2026-09-25 · 第 1 章（ch-01.md）', '',
+      '> 本文件由 recordFeedback 机械生成：人工改稿与原稿的行级 diff 聚合。', '',
+      '**原文**', '', '> 他知道事情没那么简单。', '', '**改后**', '', '> 他盯着门缝里那点光。', '',
+    ].join('\n'), 'utf-8');
+
+    // 列候选：要标出「未改写」
+    const listed = await novel(['rules', 'candidates', '--book', root]);
+    assert.equal(listed.code, 0);
+    const list = json<{ id: string; rawDiff: boolean; count: number }[]>(listed.stdout);
+    assert.equal(list.length, 1);
+    assert.equal(list[0]?.id, '2026-09-25-ch-01');
+    assert.equal(list[0]?.rawDiff, true);
+    assert.match(listed.stderr, /未改写/);
+
+    // 未改写 → 拒绝，且退出码 2（环境/参数错），不是 1
+    const refused = await novel(['rules', 'adopt', '--book', root, '--candidate', '2026-09-25-ch-01']);
+    assert.equal(refused.code, 2);
+    assert.match(refused.stderr, /机械生成的行级 diff/);
+    assert.match(refused.stderr, /提炼成一句规则/);
+
+    // 改写后 → 采纳成功
+    await writeFile(raw, '# 本书补充规则\n\n## 1 叙述\n不用「他知道」这类裁判腔。\n', 'utf-8');
+    const ok = await novel(['rules', 'adopt', '--book', root, '--candidate', '2026-09-25-ch-01']);
+    assert.equal(ok.code, 0, `采纳应成功：\n${ok.stderr}`);
+    const res = json<{ to: string; group: string }>(ok.stdout);
+    assert.equal(res.to, 'rules/2026-09-25-ch-01.md');
+    assert.equal(res.group, 'author');
+
+    // 声明要落到 book.json（不声明等于没生效）
+    const cfg = json<{ rules: { author: string[] } }>(await readFile(path.join(root, '.soloent', 'book.json'), 'utf-8'));
+    assert.deepEqual(cfg.rules.author, ['rules/2026-09-25-ch-01.md']);
+  } finally {
+    await rm(path.dirname(root), { recursive: true, force: true });
+  }
+});

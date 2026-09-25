@@ -12,7 +12,7 @@
 | # | 内容 | 暂缓原因 | 依赖 |
 |---|---|---|---|
 | B-64 | Judge 假红率标定：对《高武》已写章跑一遍，人工抽查原 16 条词面红灯（P0-1 验收：假红率 < 20%） | 需真调模型、需人工抽查；标定完才知道能否把 `fail` 从「中等」升格为常规拦截 | — |
-| B-65 | `judgeChapter` 的 LLM 路径确定性测试（当前只测了纯函数 `evaluateCriteria`） | 需录制回放，否则每跑一次都要真调模型 | B-26 |
+| B-70 | `plan draft`（各层 LLM 起草）的确定性测试 | **回放已落地（B-26），现在可以做**；原 B-59 | — |
 
 ## 由 B-12～B-15 拆出的后续项
 
@@ -28,7 +28,7 @@
 | # | 内容 | 暂缓原因 | 依赖 |
 |---|---|---|---|
 | B-58 | 定位层同步 `book.json` 的 `book` 段（v0.2 M8.0 表格写明产物 = `book.json` 的 book 段 **+** `book/premise.md`） | 当前只写 `premise.md`；`book` 段（题材/平台/读者）仍要手改 book.json，与「定位问答一次问全」有落差 | — |
-| B-59 | `plan draft`（LLM 起草各层）的确定性测试 | 需录制回放，否则每跑一次都要真调模型 | B-26 |
+| B-59 | → 已并入 B-70（回放落地后可做） | — | — |
 | B-60 | `novel init` 一并建 `plan.json`（或加 `--plan` 开关） | 现在新书要额外跑 `novel plan init` 才进逐层流程，两步容易漏；但存量书重跑 init 会被拒，需先想清迁移 | — |
 | B-61 | 文档写明「`PUT /chapter`（人工改稿）**刻意**不设闸门」 | 不写下来，日后会被当成漏接的漏洞来「修」，反而挡掉作者的正常改稿 | — |
 | B-62 | `preflight` 在风格闸门**抛错**时（如 book.json 结构非法）不输出任何 JSON | 既有行为：`Promise.all` 里 runStyleGate 抛错 → 整个 action 抛出，脚本/面板拿不到 planGate；已咬到本次冒烟验证 | — |
@@ -95,6 +95,7 @@
 | LoRA 风格微调 | 成本高，先用 few-shot |
 | v0.1 M14 压缩管线 | buildPrompt 每次从零组装，不存在旧消息 |
 | 爽点强度自动打分、以爽点类型硬拦截 | 无可靠判据 |
+| **成本统计仪表（B-27 的「按单价累计 costUsd」部分）** | **作者偏好（USER.md）：能在模型后台看到消耗，不需要工具再统计一遍。** 且单价表要猜，猜出来的阈值不可信。**保留**的只有客观的**调用数闸**：`novel book --max-llm-calls`（已有）——那是防烧钱的保险，不是记账 |
 
 ## 已完成
 
@@ -109,9 +110,20 @@
 | B-14 | Gates 退出码契约统一：`0` 跑完（结论只看 stdout JSON）/ `1` 崩溃 / `2` 环境或配置错；非 0 时 stdout 也给**结构化原因**；新增「非 0 却吐完整 GateResult → 报契约违规」的失败关闭守卫；CLI 顶层 catch 按 v0.2 M16 从 1 改 2 | 2026-09-25 · 61a2e0f |
 | B-15 | CLI 子进程冒烟测试（8 项，`apps/cli/test/`）+ gates 检查器回归固件（9 项，`gates/tests/`，**用标准库 unittest 而非 pytest**）；固件经 `gates-python.test.ts` 接进 `pnpm -r test`，缺 Python 时跳过而非假绿 | 2026-09-25 · 289f410 |
 | B-63 | （随 B-12 落地）Judge 结论与 `gateStatus` 的合并语义：**不合表，只合「决策输入」**——两者不查同一项（M10.5），各自落各自的盘，循环时取并集当拦截集。信息不丢、口径不混 | 2026-09-25 · cd46d85 |
+| B-26 | `replayLLM` 录像 / 回放：`NOVEL_LLM_RECORD_DIR` / `NOVEL_LLM_REPLAY_DIR`，按 `contentHash(model+system+user)` 取；**未命中失败关闭不回退真调**、**录像脱敏**、**回放不需要密钥** | 2026-09-25 · 6696c6c |
+| B-65 | `judgeChapter` 全链路确定性测试（prompt→调用→解析→引句核对→落盘），靠 B-26 的回放 | 2026-09-25 · 6696c6c |
+| B-28 | `rules adopt`：把改稿候选采纳进生效规则（移到 `rules/` → 声明进 `book.json` → `feedback.jsonl` 记账）；★**拒绝采纳未改写的机械 diff**（否则每章往 prompt 塞一份 diff）；拒绝覆盖已有规则文件；`novel rules candidates` 列候选 | 2026-09-25 · 见下 |
+| B-66 | 「守卫零调用者」静态检查 `tools/find-orphan-exports.mjs` + 3 项测试（含夹具自检与突变验证）；顺带把 `isPassingWorst` 接成 `assertStoppedConsistent` 自检 | 2026-09-25 · b556854 |
+| B-62 | `preflight` 闸门抛错时仍吐 JSON，且与「没就绪」**不同形**（`error` vs `blocking`）；server 的 `/preflight` 补 `styleGate` | 2026-09-25 · be5c7fa |
+| B-67 | `gates/watch_and_check.py` 接入 `kit.run_main`——`gates/` 三个入口同一套退出码语义 | 2026-09-25 · be5c7fa |
+| B-58 | 定位答案同步进 `book.json` 的 `book` 段（映射表外的 id 不写；先落 premise.md 再同步，真相源不陪葬） | 2026-09-25 · 335577d |
+| B-60 | `novel init` 默认一并建 `plan.json`（`--no-plan` 走旧路径）——否则「多跑一次 plan init」那步一定会漏 | 2026-09-25 · 335577d |
+| B-68 | 定点修订改动量上限可配（`book.json` 的 `revise` 段）；非法值回退默认不抛错 | 2026-09-25 · d9607ba |
+| B-69 | `human-needed` 的交接清单落盘 `state/handoff/ch-NN.md`；过闸即删（过期的清单不如没有） | 2026-09-25 · d9607ba |
+| B-61 | 文档写明「`PUT /chapter` 刻意不设闸门」——README 关键边界 + 架构契约决策记录（不写下来日后必被当漏洞「修」） | 2026-09-25 · 0ea2b10 |
 
 > 随 B-01/B-02 一并修掉的基建缺陷：`packages/core` 的 `test` 脚本是**硬编码文件清单**，
 > 新增的 `test/memory-context.test.ts` 没被登记 → 实际只跑 55 项，B-01/B-02 的 4 项测试
 > 从未执行过。已改为 `"test/**/*.test.ts"`。（此类「测试在但不跑」的坑与 B-15「测试基建」
-> 同类，登记为教训。）当前全量：core 103 + cli 8 = **111 项全绿，0 跳过**
+> 同类，登记为教训。）当前全量：core 126 + cli 12 = **138 项全绿，0 跳过**
 > （另含 gates 检查器的 9 项 Python 固件，经 `gates-python.test.ts` 一并跑）。

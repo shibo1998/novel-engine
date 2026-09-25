@@ -71,7 +71,11 @@ export async function loadFeedback(
     const line = rawLine.trim();
     if (line === '') continue;
     try {
-      const e = JSON.parse(line) as FeedbackEntry;
+      const e = JSON.parse(line) as FeedbackEntry & { kind?: string };
+      // 同一个 jsonl 里还混着别的记录（如 rules adopt 的采纳记录，见 rules.ts）。
+      // 按**形状**过滤而不是按 kind 字段：老记录没有 kind，按 kind 过滤会把历史全丢掉。
+      // 改稿记录的定义特征就是 original + revised 两个整段正文。
+      if (typeof e.original !== 'string' || typeof e.revised !== 'string') continue;
       if (opts?.category !== undefined && e.category !== opts.category) continue;
       out.push(e);
     } catch {
