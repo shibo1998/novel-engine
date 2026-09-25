@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { checkChapterReadiness, runStyleGate } from '@novel/core';
+import { checkChapterReadiness, checkPlanGate, runStyleGate } from '@novel/core';
 
 /**
  * novel preflight：写前预检。
@@ -14,22 +14,30 @@ import { checkChapterReadiness, runStyleGate } from '@novel/core';
  *
  * 阻断范围刻意只有一项：风格/红线层未就绪（三份文件占位符/缺失/与模板一字不差）。
  * 细纲缺失、正典待填仍只是 warnings——它们可以边写边补，而文风依据不能。
+ *
+ * ★补入第二项阻断（B-10，2026-09-25）：逐层蓝图闸门。
+ * 为什么它必须也在这里阻断，而不是只报个字段：`write`/`generate`/`book`/server 都已
+ * 按逐层闸门硬拦（上层没确认就拒绝生成）。若 preflight 报「通过」而生成命令拒绝，
+ * 就正好复刻本仓反复在治的那种矛盾——**检查器说没问题、上层却当问题**。
+ * 两道门必须给出同一个结论。
  */
 export function registerPreflight(program: Command): void {
   program
     .command('preflight')
     .description(
-      '写前预检：风格/红线层是否就绪（未就绪则非 0 退出，阻断开写）+ 本章正典与细纲准备情况',
+      '写前预检：风格/红线层与逐层蓝图是否就绪（任一未就绪则非 0 退出，阻断开写）+ 本章正典与细纲准备情况',
     )
     .requiredOption('--book <dir>', '书根目录绝对路径')
     .requiredOption('--chapter <n>', '章号', (v: string) => Number.parseInt(v, 10))
     .action(async (opts: { book: string; chapter: number }) => {
-      const [readiness, style] = await Promise.all([
+      const [readiness, style, planGate] = await Promise.all([
         checkChapterReadiness(opts.book, opts.chapter),
         runStyleGate(opts.book),
+        checkPlanGate(opts.book, opts.chapter),
       ]);
-      // 输出形状向后兼容：ChapterReadiness 的字段仍在顶层，新增 styleGate 一个键。
-      process.stdout.write(JSON.stringify({ ...readiness, styleGate: style }) + '\n');
+      // 输出形状向后兼容：ChapterReadiness 的字段仍在顶层，新增 styleGate / planGate 两个键。
+      process.stdout.write(JSON.stringify({ ...readiness, styleGate: style, planGate }) + '\n');
+      let blocked = false;
       if (!style.ready) {
         process.stderr.write(
           '⛔ 风格/红线层未就绪，已阻断开写：\n'
@@ -37,7 +45,17 @@ export function registerPreflight(program: Command): void {
             + '  处理完这三份文件再重试：.soloent/rules/story-style.md、'
             + '.soloent/constitution/MASTER.md、1-边界/预期.md\n',
         );
-        process.exitCode = 1;
+        blocked = true;
       }
+      // planGate.enabled=false（旧书，没有 plan.json）恒不阻断——不连坐
+      if (planGate.enabled && !planGate.ready) {
+        process.stderr.write(
+          '⛔ 逐层蓝图未就绪，已阻断开写：\n'
+            + planGate.blocking.map((b) => `  · ${b}\n`).join('')
+            + '  看现状与下一层：novel plan status --book <同一本书>\n',
+        );
+        blocked = true;
+      }
+      if (blocked) process.exitCode = 1;
     });
 }

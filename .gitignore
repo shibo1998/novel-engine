@@ -8,6 +8,7 @@ vite.config.ts.timestamp-*.mjs
 # 本地探针书目录（跑验证时临时生成，不入仓）
 .probe-book/
 .probe-empty/
+.probe-plan/
 
 # 本仓 agent 工作记忆（本地态；按 docs/10 的定位不随仓分发）
 .workbuddy/

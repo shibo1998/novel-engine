@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { assertStyleReady, convergeChapter } from '@novel/core';
+import { assertPlanReady, assertStyleReady, convergeChapter } from '@novel/core';
 
 export function registerGenerate(program: Command): void {
   program
@@ -12,6 +12,11 @@ export function registerGenerate(program: Command): void {
       // 风格/红线层未就绪 → 拒绝生成。放在最前面：一旦开始收敛就会烧 LLM 额度，
       // 这道门必须在**花钱之前**，而不是等三轮改写跑完再报「其实没规则可依」。
       await assertStyleReady(opts.book);
+      // 逐层蓝图未就绪 → 拒绝生成（B-10）。与风格闸门同一位置、同一理由：
+      // 逐层流程的全部意义就是「上层没定就不许往下写」；闸门若不接在这里，
+      // plan.json 就只是一份没人看的记录。
+      // 没有 .soloent/plan.json 的书恒为就绪 —— 旧书不被连坐。
+      await assertPlanReady(opts.book, opts.chapter);
       const result = await convergeChapter({
         bookRoot: opts.book,
         chapterNo: opts.chapter,

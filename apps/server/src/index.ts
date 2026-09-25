@@ -4,10 +4,12 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   applyGateResult,
+  assertPlanReady,
   assertStyleReady,
   auditRules,
   buildPrompt,
   checkChapterReadiness,
+  checkPlanGate,
   convergeChapter,
   GateFailureError,
   recordFeedback,
@@ -274,7 +276,15 @@ const server = createServer(async (req, res) => {
       }
 
       if (url.pathname === '/preflight') {
-        send(res, 200, publicReadiness(await checkChapterReadiness(bookRoot, requireChapterNo(body['chapterNo']))));
+        const chapterNo = requireChapterNo(body['chapterNo']);
+        // ★面板的预检必须与 CLI 的 preflight 给出**同一个结论**（B-10）。
+        // 两边都接上逐层蓝图闸门：若面板说「可以写」而 CLI 拒绝（或反过来），
+        // 就正好复刻本仓反复在治的矛盾——检查器说没问题、上层却当问题。
+        const [readiness, planGate] = await Promise.all([
+          checkChapterReadiness(bookRoot, chapterNo),
+          checkPlanGate(bookRoot, chapterNo),
+        ]);
+        send(res, 200, { ...publicReadiness(readiness), planGate });
         return;
       }
 
@@ -323,6 +333,10 @@ const server = createServer(async (req, res) => {
         // 与 CLI 的 generate/book 同属「会产生新正文」的动作，必须同一道门。
         // 少挡一处就等于留了一条绕过路径（本仓反复栽在「判据只在一处生效」上）。
         await assertStyleReady(bookRoot);
+        // 逐层蓝图闸门（B-10）：与 CLI 的 generate/book 同一道门。少挡一处
+        // 就等于留了一条绕过路径——本仓反复栽在「判据只在一处生效」上。
+        // 没有 .soloent/plan.json 的书恒为就绪（旧书不被连坐）。
+        await assertPlanReady(bookRoot, requireChapterNo(body['chapterNo']));
         send(res, 200, await writeChapter({ bookRoot, chapterNo: requireChapterNo(body['chapterNo']) }));
         return;
       }
@@ -332,6 +346,7 @@ const server = createServer(async (req, res) => {
         const task = beginTask(bookRoot, `收敛第 ${chapterNo} 章`);
         try {
           await assertStyleReady(bookRoot, { signal: task.signal });
+          await assertPlanReady(bookRoot, chapterNo);
           const readiness = await checkChapterReadiness(bookRoot, chapterNo);
           const generation = await convergeChapter({ bookRoot, chapterNo, signal: task.signal });
           // ★顺序不能换（F17）：读 state → 取**跑前** mtime 快照 → 跑 gate → 回填

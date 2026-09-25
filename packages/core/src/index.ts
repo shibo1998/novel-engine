@@ -25,3 +25,22 @@ export {
   DEFAULT_HOOK_TAIL_CHARS,
 } from './hooks.js';
 export type { HookSpec, HookCheckResult, HookAuditEntry } from './hooks.js';
+export {
+  POSITION_QUESTIONS,
+  LAYER_ORDER,
+  LAYER_LABEL,
+  layerFile,
+  layerKey,
+  readPlan,
+  initPlan,
+  writePosition,
+  planStatus,
+  confirmLayer,
+  checkPlanGate,
+  assertPlanReady,
+  PlanNotReadyError,
+  draftLayer,
+  hashText,
+  PlanLayerError,
+} from './plan.js';
+export type { LayerKind, LayerStatus, LayerReport, LayerConfirm, PlanFile, PlanVolume, PlanGateReport } from './plan.js';

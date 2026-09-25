@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { Command } from 'commander';
-import { assertStyleReady, checkChapterReadiness, convergeChapter, readState, updateChapterSummary, isPassingWorst } from '@novel/core';
+import { assertStyleReady, checkChapterReadiness, checkPlanGate, convergeChapter, readState, updateChapterSummary, isPassingWorst } from '@novel/core';
 
 interface ChapterRun {
   chapterNo: number;
@@ -62,12 +62,26 @@ export function registerBook(program: Command): void {
 
       const runs: ChapterRun[] = [];
       let usedCalls = 0;
-      let stoppedBy: 'completed' | 'chapter-not-passed' | 'budget-exhausted' = 'completed';
+      let stoppedBy: 'completed' | 'chapter-not-passed' | 'budget-exhausted' | 'plan-not-ready' = 'completed';
 
       for (let n = from; n <= to; n++) {
         if (usedCalls >= budget) {
           stoppedBy = 'budget-exhausted';
           process.stderr.write(`⛔ 额度用完（${usedCalls}/${budget}），在第 ${n} 章前停下。\n`);
+          break;
+        }
+        // 逐层蓝图闸门（B-10）：**逐章**查而不是开跑前查一次——每一章可能属于不同的卷，
+        // 卷纲/细纲是按卷确认的。这里用 checkPlanGate 而非 assertPlanReady：批量跑要把
+        // 「哪一章卡住、断点在哪」写进结构化报告，而不是抛异常把整份报告冲掉。
+        // 没有 .soloent/plan.json 的书 enabled=false，恒为就绪（旧书不被连坐）。
+        const planGate = await checkPlanGate(root, n);
+        if (planGate.enabled && !planGate.ready) {
+          stoppedBy = 'plan-not-ready';
+          process.stderr.write(
+            `⛔ 第 ${n} 章逐层蓝图未就绪，按「上层没定不许往下写」停下：\n`
+              + planGate.blocking.map((b) => `  · ${b}\n`).join('')
+              + '  看现状与下一层：novel plan status --book <同一本书>\n',
+          );
           break;
         }
         const readiness = await checkChapterReadiness(root, n);
