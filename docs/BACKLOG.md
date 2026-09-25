@@ -13,6 +13,7 @@
 |---|---|---|---|
 | B-64 | Judge 假红率标定：对《高武》已写章跑一遍，人工抽查原 16 条词面红灯（P0-1 验收：假红率 < 20%） | 需真调模型、需人工抽查；标定完才知道能否把 `fail` 从「中等」升格为常规拦截 | — |
 | B-70 | `plan draft`（各层 LLM 起草）的确定性测试 | **回放已落地（B-26），现在可以做**；原 B-59 | — |
+| B-71 | 收敛循环消费 `steer` 指令（`/run` 起的任务能把指令带进 revise prompt） | 路由已建但**不消费**（B-44） | B-44 |
 
 ## 由 B-12～B-15 拆出的后续项
 
@@ -61,7 +62,6 @@
 
 | # | 内容 | 来源 |
 |---|---|---|
-| B-44 | Server 长任务 202 + SSE、`POST /edit`、Last-Event-ID 补发 | v0.2 M17 |
 | B-45 | Web：时间轴/阅读器/人工介入清单/Findings 跳转、虚拟滚动、SSE 降级 | v0.2 §8 |
 | B-53 | Python 检查器逐个迁移到 TS | docs/24 P1-3 |
 | B-54 | 收拢三套系统：停用 webnovel-writer 插件钩子、合并 STORY_RULES 重复条目 | docs/24 P1-1 |
@@ -104,6 +104,7 @@
 | B-61 | 文档写明「`PUT /chapter` 刻意不设闸门」——README 关键边界 + 架构契约决策记录（不写下来日后必被当漏洞「修」） | 2026-09-25 · 0ea2b10 |
 | B-56 | legacy 手册归档到 `docs/legacy/`（`docs/legacy-README.md` → `docs/legacy/README.md`，同 SKILL） | 2026-09-25 · 见下 |
 | B-55 | `content/` 清理**清单**已出（`docs/28-content清理清单.md`）：建议删 `oc-kaleidos`+`oc-kosmos`（642K）+`weekly-meme-report`（44K）；`wuhang-*` 列出但**不建议删**（与 `plan`/`write` 功能重叠属 B-54）。★**未删任何文件，等作者确认** | 2026-09-25 · 见下 |
+| B-44 | Server 长任务：`POST /run` **立即返回 202 `{runId}`**，后台跑；`GET /events` **SSE** 支持 `Last-Event-ID` 补发，补不到时发 `event: gap`（**不带 id**，不污染续传位置）；`POST /edit` 统一写入口，**拒写 gateStatus/needsReview/contentHash**；`POST /steer` 投递指令但**明说 consumed: false**（收敛循环当前不消费它 → 后续项 B-71）
 | B-31 | 评测集与度量仪器 `novel eval`：`<书根>/evals/<用例名>/`（`chapter.md` + `outline.md` + `expect.json{verdict,criterion,note}`）；跑完报**检出率**（分母=fail 用例）、**假红率**（分母=pass 用例）、unsure 占比。★`unsure` **既不算检出也不算放过**；★用例数为 0 时是 `null` 不是 0；★**在临时目录造书跑，不碰真书的 chapters/state/gateStatus**；★缺文件/verdict 非法**一律报错不静默跳过**（静默跳过会让分母悄悄变小） | 2026-09-25 · 见下 |
 | B-43 | Arbiter 四类封闭裁定（`pick-strategy`/`blast-radius`/`escape-route`/`assign-payoff`）：★**候选集由 Engine 给全**，选到集外判**无效**；★**默认交人**（不开 auto 连模型都不调）；★**自洽采样 3 次**不一致即交人（不用模型自报置信度——那是没校准的数字）；★**只选不写**（记录里无正文字段）；落 `state/decisions/d-XXXX.json` | 2026-09-25 · 见下 |
 | B-40 | `novel planner next\|compass\|expand` 滚动展开：`reviseCompass`（基于**已写档案**校准总纲，与初次 `draftLayer('outline')` 不可互替）+ `expandNextVolume`（一次一卷）。★**M8.6「顺序不可反」用形状强制**——`state/planner.json` 记「总纲校准到第几章」，已写进度超过它就直接拒绝展开（`--no-enforce-order` 可跳过但**返回值留痕**）；★远卷只留一行标题，禁止空壳蓝图 | 2026-09-25 · 见下 |
@@ -128,6 +129,6 @@
 > 随 B-01/B-02 一并修掉的基建缺陷：`packages/core` 的 `test` 脚本是**硬编码文件清单**，
 > 新增的 `test/memory-context.test.ts` 没被登记 → 实际只跑 55 项，B-01/B-02 的 4 项测试
 > 从未执行过。已改为 `"test/**/*.test.ts"`。（此类「测试在但不跑」的坑与 B-15「测试基建」
-> 同类，登记为教训。）当前全量：core 235 + cli 22 = **257 项全绿，0 跳过**
+> 同类，登记为教训。）当前全量：core 246 + cli 22 + server 5 = **273 项全绿，0 跳过**
 > （gates 检查器固件已增至 **19 项**，覆盖 4 个检查器）
 > （另含 gates 检查器的 9 项 Python 固件，经 `gates-python.test.ts` 一并跑）。

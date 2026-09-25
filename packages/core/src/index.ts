@@ -77,6 +77,8 @@ export { collectStats, editedLineCount } from './stats.js';
 export { buildWrapUpReport } from './wrapup.js';
 export { buildStyleAnchor } from './style-anchor.js';
 export { runEvalSet, loadEvalSet, EvalError } from './eval.js';
+export { RunEventLog, RunRegistry } from './runs.js';
+export type { RunEvent, RunRecord, RunStatus, SinceResult } from './runs.js';
 export type { EvalCase, EvalCaseResult, EvalReport, RunEvalOptions } from './eval.js';
 export {
   ARBITER_KINDS,

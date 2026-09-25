@@ -14,6 +14,7 @@ import {
   GateFailureError,
   recordFeedback,
   readState,
+  RunRegistry,
   runGates,
   runStyleGate,
   saveChapterText,
@@ -130,7 +131,7 @@ function requireWriteEnabled(): void {
 }
 
 /** 会改盘的路由清单。集中判定而非散落在各 handler 里，新增路由时漏判能在评审时一眼看见。 */
-const WRITE_PATHNAMES: ReadonlySet<string> = new Set(['/write', '/generate', '/summarize', '/feedback']);
+const WRITE_PATHNAMES: ReadonlySet<string> = new Set(['/write', '/generate', '/summarize', '/feedback', '/run', '/edit']);
 
 function isWriteRequest(method: string, pathname: string, body: Record<string, unknown>): boolean {
   if (method === 'PUT' && pathname === '/chapter') return true;
@@ -138,6 +139,23 @@ function isWriteRequest(method: string, pathname: string, body: Record<string, u
   // /gates 自身只读，但 write:true 会把结果回填落盘
   if (method === 'POST' && pathname === '/gates' && body['write'] === true) return true;
   return false;
+}
+
+/**
+ * 长任务事件流（B-44）。
+ *
+ * ★与下面的 `inflight` 分工不同，**刻意不合并**：
+ *   · `inflight` 回答「谁在跑、怎么停」——按 bookRoot 键，`/cancel` 用它；
+ *   · `runs`     回答「发生过什么」——按 runId 键，`/events` 用它。
+ * 一个 run 同时登记在两处，`InflightTask.runId` 把它们对上。
+ */
+const runs = new RunRegistry();
+
+/** 写一条 SSE 事件。`id` 给了才写 `id:` 行——`gap` 这类控制事件**不能带 id**（会污染客户端的续传位置） */
+function sseEvent(res: ServerResponse, name: string | null, id: number | null, data: unknown): void {
+  if (id !== null) res.write(`id: ${id}\n`);
+  if (name !== null) res.write(`event: ${name}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 /**
@@ -151,10 +169,12 @@ interface InflightTask {
   controller: AbortController;
   label: string;
   startedAt: number;
+  /** B-44：与该任务对应的事件流 runId（`/run` 起的长任务才有；`/tasks` 用它把两处对上） */
+  runId?: string;
 }
 const inflight = new Map<string, InflightTask>();
 
-function beginTask(bookRoot: string, label: string): AbortController {
+function beginTask(bookRoot: string, label: string, runId?: string): AbortController {
   const existing = inflight.get(bookRoot);
   if (existing !== undefined) {
     throw new HttpError(
@@ -164,7 +184,7 @@ function beginTask(bookRoot: string, label: string): AbortController {
     );
   }
   const controller = new AbortController();
-  inflight.set(bookRoot, { controller, label, startedAt: Date.now() });
+  inflight.set(bookRoot, { controller, label, startedAt: Date.now(), ...(runId !== undefined ? { runId } : {}) });
   return controller;
 }
 
@@ -242,8 +262,46 @@ const server = createServer(async (req, res) => {
           label: t.label,
           startedAt: new Date(t.startedAt).toISOString(),
           elapsedMs: Date.now() - t.startedAt,
+          // B-44：长任务的事件流 id。没有它，客户端拿到 `202 {runId}` 之后
+          // 无法在 `/tasks` 里认出「这就是我起的那个」。
+          runId: t.runId ?? null,
         })),
       });
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/events') {
+      // 长任务事件流（B-44）。
+      // ★鉴权只认 `Authorization: Bearer` 头（与其余路由一致），**所以客户端必须用
+      //   fetch + ReadableStream 读，不能用 EventSource**——EventSource 不能设请求头。
+      //   把 token 放进查询串也能用，但那会让 token 出现在访问日志里，不做。
+      const bookRoot = resolveBookRoot(url.searchParams.get('bookRoot'));
+      const rawLast = url.searchParams.get('lastEventId') ?? req.headers['last-event-id'];
+      const lastId = typeof rawLast === 'string' && /^\d+$/.test(rawLast) ? Number(rawLast) : 0;
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        // 反向代理下不缓冲，否则事件会被攒着一起发
+        'X-Accel-Buffering': 'no',
+      });
+      const log = runs.logFor(bookRoot);
+      const replay = log.since(lastId);
+      if (replay.gap) {
+        // ★补不到就**明说**，不带 id（不污染客户端的续传位置）。
+        // 假装补发成功会让客户端以为「中间没发生什么」，而真相是「中间的事已经不在缓冲里了」。
+        sseEvent(res, 'gap', null, {
+          requested: lastId,
+          oldest: replay.oldest,
+          note: '请求的 lastEventId 早于缓冲里最老的一条，中间的事件已补不到（缓冲有界 / 服务重启过）。'
+            + '请重新拉一次完整状态，不要假设「中间没发生什么」。',
+        });
+      }
+      for (const e of replay.events) sseEvent(res, null, e.id, e);
+      const unsub = log.subscribe((e) => sseEvent(res, null, e.id, e));
+      // 断开就退订：不退订会让缓冲里的订阅者越积越多，而它们各自持有一个已关闭的 res
+      req.on('close', () => { unsub(); });
       return;
     }
 
@@ -266,6 +324,84 @@ const server = createServer(async (req, res) => {
           label: target.label,
           note: '已发出取消信号：检查器会被 SIGKILL，收敛循环会在下一个可中断点停下',
         });
+        return;
+      }
+
+      if (url.pathname === '/run') {
+        // ★立即返回 202，任务在后台跑（B-44）。
+        // 为什么不是「跑完一起返回」：那就又回到同步了——一次收敛几十秒到几分钟，
+        // 连接挂着什么也看不见，客户端超时断开而服务端照样跑完。
+        const chapterNo = requireChapterNo(body['chapterNo']);
+        const mode = body['mode'] === 'write' ? 'write' : 'converge';
+        const label = `${mode === 'write' ? '起草' : '收敛'}第 ${chapterNo} 章`;
+        // 两处登记：inflight 管「怎么停」（/cancel 按 bookRoot 找），runs 管「发生过什么」
+        const task = beginTask(bookRoot, label);
+        const { runId } = runs.begin(bookRoot, label);
+        const existing = inflight.get(bookRoot);
+        if (existing !== undefined) existing.runId = runId;
+
+        send(res, 202, {
+          runId, bookRoot, chapterNo, mode,
+          eventsUrl: `/events?bookRoot=${encodeURIComponent(bookRoot)}`,
+          note: '任务已在后台开始。进度走 GET /events（SSE，带 Last-Event-ID 可续传）；取消走 POST /cancel。',
+        });
+
+        void (async (): Promise<void> => {
+          try {
+            // ★前置闸门一个都不能少（与 /generate 同一道门）。
+            // 少挡一处就是留一条绕过路径——本项目反复栽在这上面（CLI 的 novel write 就漏过）。
+            // 异步模型下闸门失败**通过事件流报**（不是 4xx）：202 的含义是「已受理」，
+            // 「能不能跑」是任务自己的事，用 finished/failed 事件如实说。
+            await assertStyleReady(bookRoot, { signal: task.signal });
+            await assertPlanReady(bookRoot, chapterNo);
+            const result = mode === 'write'
+              ? await writeChapter({ bookRoot, chapterNo })
+              : await convergeChapter({ bookRoot, chapterNo, signal: task.signal });
+            runs.finish(runId, task.signal.aborted ? 'cancelled' : 'done', { result: result as unknown as Record<string, unknown> });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            runs.finish(runId, task.signal.aborted ? 'cancelled' : 'failed', { error: msg });
+          } finally {
+            endTask(bookRoot, task);
+          }
+        })();
+        return;
+      }
+
+      if (url.pathname === '/steer') {
+        // 投递一条指令到运行中的任务（B-44）。
+        // ★**当前收敛循环不消费它**——响应里 `consumed: false` 明说这一点，
+        //   免得调用方以为「投了就会生效」。指令已进事件流，供人观察与后续接线。
+        const runId = typeof body['runId'] === 'string' ? body['runId'] : '';
+        const instruction = requireText(body['instruction'], 'instruction');
+        if (runId === '') throw new HttpError(400, 'runId 缺失');
+        const rec = runs.get(runId);
+        if (rec === undefined) throw new HttpError(404, `没有这个 run：${runId}`);
+        if (rec.status !== 'running') {
+          send(res, 200, { delivered: false, consumed: false, note: `该 run 已结束（${rec.status}），指令未投递` });
+          return;
+        }
+        const e = runs.steer(bookRoot, runId, instruction);
+        send(res, 200, {
+          delivered: true, consumed: false, eventId: e.id,
+          note: '指令已记入事件流，但**当前收敛循环不消费它**（消费 steer 是后续工作）。'
+            + '它现在的作用是「留痕 + 让人在 /events 里看见」。',
+        });
+        return;
+      }
+
+      if (url.pathname === '/edit') {
+        // 统一写入口（B-44 / M17）：服务端校验，**禁止写结论字段**。
+        // 为什么单独拦 gateStatus / needsReview：它们是检查的结论，不是作者输入。
+        // 任何「不经检查就能写出绿」的路都是一条绕过路径（与 novel state --set 同一条裁定）。
+        for (const f of ['gateStatus', 'needsReview', 'contentHash']) {
+          if (f in body) {
+            throw new HttpError(400, `/edit 拒绝写入 ${f}：它是检查的结论，只能由 /gates 跑出来`);
+          }
+        }
+        const chapterNo = requireChapterNo(body['chapterNo']);
+        const text = requireText(body['text'], 'text');
+        send(res, 200, await saveChapterText({ bookRoot, chapterNo, text }));
         return;
       }
 
