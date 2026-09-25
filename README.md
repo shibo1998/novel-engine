@@ -65,6 +65,7 @@ cd apps/web && node node_modules/vite/bin/vite.js   # :5319
 | `foreshadow sync\|list\|set --book <书根>` | 伏笔台账：★**id 由引擎分配**（`f-001`，模型不得自造）；等级/计划回收章/放弃由人定；**逾期按当前进度读时现算** |
 | `lookup character\|timeline\|conflicts --book <书根>` | 结构化反查（只读）：角色出场史与状态变化、时间线、事实层矛盾提示。★会报**抽取覆盖率**——「没记录」≠「没出场」 |
 | `checkpoint list\|commit\|resume\|restore\|rollback\|prune\|journal --book <书根>` | 两步提交与快照回退。★`resume` 按**目标指纹**判定「补完还是回退」；★`restore` 对**来历不明**的 state 拒绝覆盖；★`rollback` **不改正文**（那由书仓 git 回退） |
+| `arbiter kinds\|ask\|decide\|list --book <书根>` | 四类封闭裁定（走哪条线/波及面/怎么脱身/爽点派给谁）。★**默认交人**（不开 `--auto` 连模型都不调，exit 3）；★**候选集由调用方给全**，选到集外判无效；★`--auto` 时**自洽采样 3 次**，不一致仍交人；★**只选不写**（不生成正文） |
 | `planner next\|compass\|expand --book <书根>` | 滚动展开：先 `compass`（基于**已写档案**校准总纲）再 `expand`（展**下一卷**）。★**顺序不可反**由形状强制（总纲没校准过就拒绝展开）；★**一次只展一卷**（远卷只留一行标题） |
 | `style-anchor --book <书根> [--from <样板书目录>] [--write]` | 从实测样本提炼文风节拍，给出可粘贴的 `checks.rhythm` 阈值。★**判据不重写**（调用检查器的 `--suggest-rhythm`）；★没样本时**明确报错**不返回「指标全 0」；★`anchors/style.md` 是**锚点不是闸门**（改它不生效） |
 | `impact --book <书根> --term <词> [--term ...]` | 设定变更影响分析（**只读**）。★人工圈定 `--chapters 3,7,12` 后加 `--rewrite --instruction "改成什么"` 才动手，且**按章号升序**逐章定点改 |

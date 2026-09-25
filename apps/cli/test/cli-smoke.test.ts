@@ -535,3 +535,76 @@ test('★B-40：novel planner next 可用；未开启逐层流程时明确报错
     await rm(path.dirname(root), { recursive: true, force: true });
   }
 });
+
+test('★B-43：novel arbiter 默认交人（exit 3）；decide 记人工裁定；候选集是边界', async () => {
+  const root = await newBook(['--no-plan']);
+  // 只放选项（不含子命令名）——子命令在调用处拼，避免重复
+  const base = ['--book', root, '--kind', 'pick-strategy', '--prompt', '走哪条线？',
+    '--candidate', '正面突围', '--candidate', '诈降后反杀'];
+  try {
+    // kinds：四类题型列出来
+    const kinds = await novel(['arbiter', 'kinds']);
+    assert.equal(kinds.code, 0);
+    assert.equal(json<unknown[]>(kinds.stdout).length, 4);
+
+    // 默认交人：**不调模型**（没配 LLM env 也不该报错），且退出码 3（需要人工介入）
+    const ask = await novel(['arbiter', 'ask', ...base]);
+    assert.equal(ask.code, 3, `默认应「需要人工介入」：\n${ask.stderr}`);
+    const d = json<{ by: string; choice?: string; id: string }>(ask.stdout);
+    assert.equal(d.by, 'human-needed');
+    assert.equal(d.choice, undefined);
+    assert.match(ask.stderr, /请人工定夺/);
+    assert.match(ask.stderr, /novel arbiter decide/, '要给出人工裁定的完整命令');
+
+    // 人工裁定
+    const dec = await novel(['arbiter', 'decide', ...base, '--choice', '正面突围', '--reason', '读者要的是爽']);
+    assert.equal(dec.code, 0, `人工裁定应成功：\n${dec.stderr}`);
+    assert.equal(json<{ by: string; choice: string }>(dec.stdout).choice, '正面突围');
+
+    // 候选集是边界：选不在候选里的 → 拒绝
+    const bad = await novel(['arbiter', 'decide', ...base, '--choice', '第四条路', '--reason', 'x']);
+    assert.equal(bad.code, 2);
+    assert.match(bad.stderr, /不在候选集里/);
+
+    // 缺 reason → 拒绝
+    const noReason = await novel(['arbiter', 'decide', ...base, '--choice', '正面突围']);
+    assert.equal(noReason.code, 2);
+
+    // 候选少于 2 项 → 拒绝（没有可选的东西就不是裁定）
+    const oneCand = await novel(['arbiter', 'ask', '--book', root, '--kind', 'pick-strategy',
+      '--prompt', 'x', '--candidate', '只有一个']);
+    assert.equal(oneCand.code, 2);
+    assert.match(oneCand.stderr, /候选集少于 2 项/);
+
+    // list 能看到两条
+    const list = await novel(['arbiter', 'list', '--book', root]);
+    assert.equal(json<unknown[]>(list.stdout).length, 2);
+    assert.match(list.stderr, /待人/);
+  } finally {
+    await rm(path.dirname(root), { recursive: true, force: true });
+  }
+});
+
+test('★commander 自身的报错也要走退出码契约（缺必填项/未知选项 → 2，--help → 0）', async () => {
+  // 2026-09-25 实测踩到：不加 exitOverride 时 commander 自己 process.exit(1)，
+  // 绕过契约——「命令敲错了」报 1，与「内容未通过」同形。
+  // ★而且父级装了不会传给子命令，必须递归装（这条就是被它咬过才写的）。
+
+  // 缺必填项（子命令自己报的）
+  const missing = await novel(['arbiter', 'decide', '--book', 'x', '--kind', 'pick-strategy', '--prompt', 'p', '--candidate', 'A', '--candidate', 'B', '--choice', 'A']);
+  assert.equal(missing.code, 2, `缺必填项应报 2（参数错），实得 ${missing.code}`);
+  assert.match(missing.stderr, /required option/);
+
+  // 未知选项
+  const unknownOpt = await novel(['stats', '--book', 'x', '--不存在的选项']);
+  assert.equal(unknownOpt.code, 2);
+
+  // 未知命令
+  const unknownCmd = await novel(['完全不存在的命令']);
+  assert.equal(unknownCmd.code, 2);
+
+  // --help / --version 是**正常退出**，必须 0（不能被当成错误）
+  assert.equal((await novel(['--help'])).code, 0, '--help 必须 0');
+  assert.equal((await novel(['arbiter', '--help'])).code, 0, '子命令 --help 必须 0');
+  assert.equal((await novel(['--version'])).code, 0, '--version 必须 0');
+});

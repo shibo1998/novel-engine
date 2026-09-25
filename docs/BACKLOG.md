@@ -61,7 +61,6 @@
 
 | # | 内容 | 来源 |
 |---|---|---|
-| B-43 | Arbiter（四类封闭裁定，默认交人，自洽采样） | v0.2 M13 |
 | B-44 | Server 长任务 202 + SSE、`POST /edit`、Last-Event-ID 补发 | v0.2 M17 |
 | B-45 | Web：时间轴/阅读器/人工介入清单/Findings 跳转、虚拟滚动、SSE 降级 | v0.2 §8 |
 | B-53 | Python 检查器逐个迁移到 TS | docs/24 P1-3 |
@@ -105,6 +104,7 @@
 | B-61 | 文档写明「`PUT /chapter` 刻意不设闸门」——README 关键边界 + 架构契约决策记录（不写下来日后必被当漏洞「修」） | 2026-09-25 · 0ea2b10 |
 | B-56 | legacy 手册归档到 `docs/legacy/`（`docs/legacy-README.md` → `docs/legacy/README.md`，同 SKILL） | 2026-09-25 · 见下 |
 | B-55 | `content/` 清理**清单**已出（`docs/28-content清理清单.md`）：建议删 `oc-kaleidos`+`oc-kosmos`（642K）+`weekly-meme-report`（44K）；`wuhang-*` 列出但**不建议删**（与 `plan`/`write` 功能重叠属 B-54）。★**未删任何文件，等作者确认** | 2026-09-25 · 见下 |
+| B-43 | Arbiter 四类封闭裁定（`pick-strategy`/`blast-radius`/`escape-route`/`assign-payoff`）：★**候选集由 Engine 给全**，选到集外判**无效**；★**默认交人**（不开 auto 连模型都不调）；★**自洽采样 3 次**不一致即交人（不用模型自报置信度——那是没校准的数字）；★**只选不写**（记录里无正文字段）；落 `state/decisions/d-XXXX.json` | 2026-09-25 · 见下 |
 | B-40 | `novel planner next\|compass\|expand` 滚动展开：`reviseCompass`（基于**已写档案**校准总纲，与初次 `draftLayer('outline')` 不可互替）+ `expandNextVolume`（一次一卷）。★**M8.6「顺序不可反」用形状强制**——`state/planner.json` 记「总纲校准到第几章」，已写进度超过它就直接拒绝展开（`--no-enforce-order` 可跳过但**返回值留痕**）；★远卷只留一行标题，禁止空壳蓝图 | 2026-09-25 · 见下 |
 | B-48 | `novel style-anchor` 文风样稿提炼：调用检查器的 `--suggest-rhythm`（**判据不重写**），解析出指标分位表 + 可粘贴的 `checks.rhythm` 阈值 + 「按此值 N/M 篇会被拦」，`--write` 落 `anchors/style.md`。★**没样本时明确报错**（不返回「指标全 0」）；★产物是**锚点不是闸门**（改它不生效，要改标准得改 book.json）；★提醒「按现状校准只会固化现状」 | 2026-09-25 · 见下 |
 | B-41 | 设定变更影响分析 `novel impact`：①分析（全文扫关键词 + 事实库相关角色 + 台账相关伏笔）②**人工圈定** `--chapters` ③**按章号升序**逐章定点重写。★不加 `--chapters` 时**不动任何文件**；★`--rewrite` 强制升序+串行（先改后章会让它读到旧的前章）；★中途失败**停下**不继续 | 2026-09-25 · 见下 |
@@ -127,6 +127,6 @@
 > 随 B-01/B-02 一并修掉的基建缺陷：`packages/core` 的 `test` 脚本是**硬编码文件清单**，
 > 新增的 `test/memory-context.test.ts` 没被登记 → 实际只跑 55 项，B-01/B-02 的 4 项测试
 > 从未执行过。已改为 `"test/**/*.test.ts"`。（此类「测试在但不跑」的坑与 B-15「测试基建」
-> 同类，登记为教训。）当前全量：core 218 + cli 19 = **237 项全绿，0 跳过**
+> 同类，登记为教训。）当前全量：core 228 + cli 21 = **249 项全绿，0 跳过**
 > （gates 检查器固件已增至 **19 项**，覆盖 4 个检查器）
 > （另含 gates 检查器的 9 项 Python 固件，经 `gates-python.test.ts` 一并跑）。

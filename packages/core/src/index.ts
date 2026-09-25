@@ -77,6 +77,17 @@ export { collectStats, editedLineCount } from './stats.js';
 export { buildWrapUpReport } from './wrapup.js';
 export { buildStyleAnchor } from './style-anchor.js';
 export {
+  ARBITER_KINDS,
+  ARBITER_SAMPLES,
+  askArbiter,
+  recordHumanDecision,
+  listDecisions,
+  assertQuestion,
+  parseChoice,
+  ArbiterError,
+} from './arbiter.js';
+export type { ArbiterKind, ArbiterQuestion, ArbiterDecision, AskArbiterOptions } from './arbiter.js';
+export {
   reviseCompass,
   expandNextVolume,
   nextVolume,
