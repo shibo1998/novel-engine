@@ -56,5 +56,5 @@ test('gates 检查器回归固件（gates/tests/test_gates.py）全部通过', {
   assert.match(r.err, /OK/, 'unittest 的正常收尾行应在 stderr（unittest 把结果写 stderr）');
   const ran = /Ran (\d+) test/.exec(r.err);
   assert.ok(ran !== null, '要能看到跑了多少条——「跑了几条」与「全过」是两件事');
-  assert.ok(Number(ran[1]) >= 9, `固件条数不应减少（实得 ${ran[1]}）——被静默删掉就是回归`);
+  assert.ok(Number(ran[1]) >= 19, `固件条数不应减少（实得 ${ran[1]}）——被静默删掉就是回归`);
 });

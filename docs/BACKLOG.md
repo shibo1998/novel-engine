@@ -72,8 +72,6 @@
 | B-43 | Arbiter（四类封闭裁定，默认交人，自洽采样） | v0.2 M13 |
 | B-44 | Server 长任务 202 + SSE、`POST /edit`、Last-Event-ID 补发 | v0.2 M17 |
 | B-45 | Web：时间轴/阅读器/人工介入清单/Findings 跳转、虚拟滚动、SSE 降级 | v0.2 §8 |
-| B-46 | 查重 Gate（章内/跨章 n-gram） | v0.2 附 A |
-| B-47 | 平台敏感词 Gate | v0.2 M15.4 |
 | B-48 | 文风样稿提炼 → `anchors/style.md` | v0.2 附 A |
 | B-49 | 人物口吻字段（口头禅、说话风格）并纳入 J3 | v0.2 附 A |
 | B-50 | 摘要/抽取/初筛可配小模型 | v0.2 附 A |
@@ -120,6 +118,8 @@
 | B-68 | 定点修订改动量上限可配（`book.json` 的 `revise` 段）；非法值回退默认不抛错 | 2026-09-25 · d9607ba |
 | B-69 | `human-needed` 的交接清单落盘 `state/handoff/ch-NN.md`；过闸即删（过期的清单不如没有） | 2026-09-25 · d9607ba |
 | B-61 | 文档写明「`PUT /chapter` 刻意不设闸门」——README 关键边界 + 架构契约决策记录（不写下来日后必被当漏洞「修」） | 2026-09-25 · 0ea2b10 |
+| B-46 | `duplicate_check` 查重闸门：跨章整句重复（≥12 字，报在**后出现**那章）中等；章内短语重复（10 字 ≥3 次）轻微。阈值可配，默认取「明显不像巧合」的下界 | 2026-09-25 · 见下 |
+| B-47 | `sensitive_check` 敏感词闸门：★**词表没配 = 本项未生效**（payload 带 `not_effective` + 原因），绝不当成「扫过且干净」；**不内置词表**（会过期，比没有更危险）。`novel gates --gate` 新增，且**书级闸门拒绝 `--write`** | 2026-09-25 · 见下 |
 | B-70 | `plan draft` 全链路确定性测试（靠 B-26 回放）：草稿逐字一致、零网络请求、**只写 `state/drafts/` 不碰正式文件**、上游未确认时**在调模型之前**拒绝 | 2026-09-25 · e5cb251 |
 | B-29 | `novel stats`：★北极星 = **人工改稿行数/千字**；机器返工次数、gates 与 Judge 通过率、needsReview 计数。**不含成本统计**（作者偏好）。没数据时是 `null`/「没有数据」而**不是 0** | 2026-09-25 · 见下 |
 | B-25 | 书级写锁：`{pid, host, label, at, token}`；**陈旧锁可接管**（pid 不在 / 锁龄超 30 分钟）；**同进程可重入**（convergeChapter→writeChapter 不自挡）；release 只认自己的 token。★锁放在 `writeChapter`/`convergeChapter` **内部**而非各入口接线（B-10 的教训）。`novel lock status\|release` | 2026-09-25 · 见下 |
@@ -128,4 +128,5 @@
 > 新增的 `test/memory-context.test.ts` 没被登记 → 实际只跑 55 项，B-01/B-02 的 4 项测试
 > 从未执行过。已改为 `"test/**/*.test.ts"`。（此类「测试在但不跑」的坑与 B-15「测试基建」
 > 同类，登记为教训。）当前全量：core 145 + cli 14 = **159 项全绿，0 跳过**
+> （gates 检查器固件已增至 **19 项**，覆盖 4 个检查器）
 > （另含 gates 检查器的 9 项 Python 固件，经 `gates-python.test.ts` 一并跑）。

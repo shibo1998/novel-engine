@@ -44,14 +44,30 @@
 
 ## 2. 门禁契约（gates/ ↔ runGates）
 
-- 检查器：`gates/consistency_check.py`，spawn 参数 `[gatePath, '--root', bookRoot]`
-  （**位置参数无效**，会被当章节白名单，exit 2）。
+- 检查器：`gates/*.py`，spawn 参数 `[gatePath, '--root', bookRoot]`
+  （**位置参数无效**，会被当章节白名单，exit 2）。用 `novel gates --gate <name>` 选检查器。
 - stdout 单行 JSON：
   `{gate, book_root, chapter_count, counts: Partial<Record<severity, number>>, findings: [...]}`
 - `findings[]` = `{severity, chapter, line, check, detail}`；severity 中文四档
   **严重/中等/轻微/提示**（提示仅在书开 `gate.draft_free` 时出现）；`line: 0` = 整章级。
-- **退出码语义：发现问题也返回 0**；非 0（exit 2）才是执行失败。`runGates` 按此判定，不得反转。
+- **退出码契约（B-14）**：`0` 跑完（发现问题也是 0，结论只看 stdout JSON）／
+  `1` 脚本崩溃／`2` 环境或配置错。**非 0 只有一个含义：本次没产出可用结论**，
+  上层一律当失败处理，绝不允许读成「查了没问题」。非 0 时 stdout 也给结构化原因
+  （`{ok:false, error:{kind,detail,problems}}`），供上层按 kind 分流。
 - 检查器零写文件（原版的 notes/ 报告与趋势 CSV 已移除）；人类可读输出全走 stderr。
+
+**现有检查器**（`kit.run_main` 统一入口，同一套退出码语义）：
+
+| 检查器 | 判什么 | `chapter_count` |
+|---|---|---|
+| `consistency_check` | 章级内容对账（AI 句式、节奏、数值、面板…） | 实际章数（**唯一可回填的**） |
+| `style_doc_check` | 书级前置：三份风格/红线文件填了没 | 恒 0 |
+| `sensitive_check`（B-47） | 平台敏感词。★**词表没配 = 本项未生效**，payload 带 `not_effective` | 恒 0 |
+| `duplicate_check`（B-46） | 跨章整句重复 / 章内短语重复 | 恒 0 |
+
+★**`chapter_count` 恒 0 的检查器不许接回填**：`applyGateResult` 会因
+`0 != state.chapters.length` 抛错——那是**刻意的失败关闭**，不是缺特判。
+`novel gates --write` 因此在 CLI 层就拒绝非 `consistency_check` 的 `--gate`。
 
 ## 3. 状态契约（state/story.json）
 

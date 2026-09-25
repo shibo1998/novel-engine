@@ -57,10 +57,12 @@ cd apps/web && node node_modules/vite/bin/vite.js   # :5319
 | `preflight --book <书根> --chapter <n>` | 正典与 `outline/ch-NN.md` 准备情况（**只提示**）；另含**风格/红线层**与**逐层蓝图**两道闸门——任一未就绪则非 0 退出、阻断开写 |
 | `plan init\|status\|position\|draft\|confirm` | 逐层递进建书：定位 → 设定 → 总纲 → 卷纲 → 细纲，**每层经作者确认才解锁下一层** |
 | `judge --book <书根> --chapter <n> [--advisory] [--write]` | 语义审稿（J1 蓝图契约 / J2 章末钩子 / J3 连续性）；另有 `--list` / `--scaffold` / `--status`。**证据引句命不中即降 `unsure`** |
-| `gates --book <书根> [--write]` | 跑检查器；默认只读预览，--write 回填 gateStatus |
+| `gates --book <书根> [--gate <名>] [--write]` | 跑检查器（缺省 `consistency_check`；另有 `sensitive_check` / `duplicate_check` / `style_doc_check`）；默认只读预览，`--write` 回填 gateStatus（**仅 `consistency_check`**——书级闸门 `chapter_count` 恒 0，接不上回填） |
 | `state --book <书根> [--rebuild] [--set <json>]` | 读/重建章节索引；`--set` 可写数据字段，但**结论字段一律被摘掉**（`gateStatus` + `needsReview`；绿只能由 `gates` 跑出来） |
 | `summarize --book <书根> --chapter <n>` | 生成或刷新长篇上下文摘要 |
 | `rules audit --book <书根>` | 检查规则文件遗漏声明或声明路径缺失 |
+| `stats --book <书根> [--per-chapter]` | 全书度量：★北极星 = **人工改稿行数/千字**；机器返工次数、gates 与 Judge 通过率。**不含成本统计**（能在模型后台看） |
+| `lock status\|release --book <书根>` | 书级写锁的查看与强制释放（锁由 `writeChapter`/`convergeChapter` 自动获取） |
 | `hooks --book <书根> [--all]` | 章末钩子锚词校验（**只读线索报告**：不计入拦截、不影响退出码，红灯须人工复核） |
 | `feedback add --book <书根> --chapter <n> --file <改后稿>` | 落 `.soloent/feedback.jsonl` + diff 聚合规则候选到 `_candidates/` |
 | `novel --help` | 完整参数 |

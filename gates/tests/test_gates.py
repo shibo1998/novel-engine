@@ -62,12 +62,19 @@ STYLE_DOCS = {
 }
 
 
-def make_book(root, chapter_text=PLAIN_TEXT, style_filled=True, book_json=None):
-    """造一本最小可检书。style_filled=False 时三份风格文件保持未填模板形态（缺失）。"""
+def make_book(root, chapter_text=PLAIN_TEXT, style_filled=True, book_json=None, extra_cfg=None, extra_chapters=None):
+    """造一本最小可检书。
+
+    style_filled=False → 三份风格文件缺失（反例）；
+    extra_cfg         → 合并进 book.json 顶层（如 checks.duplicate / checks.sensitive）；
+    extra_chapters    → {文件名: 正文}，追加章节（跨章判据需要两章以上）。
+    """
     os.makedirs(os.path.join(root, ".soloent"), exist_ok=True)
     os.makedirs(os.path.join(root, "chapters"), exist_ok=True)
     os.makedirs(os.path.join(root, "state"), exist_ok=True)
-    cfg = BOOK_JSON if book_json is None else book_json
+    cfg = dict(BOOK_JSON if book_json is None else book_json)
+    if extra_cfg:
+        cfg.update(extra_cfg)
     with open(os.path.join(root, ".soloent", "book.json"), "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False)
     with open(os.path.join(root, ".soloent", "canon.md"), "w", encoding="utf-8") as f:
@@ -78,6 +85,9 @@ def make_book(root, chapter_text=PLAIN_TEXT, style_filled=True, book_json=None):
         f.write("# 当前进度\n\n（待填）\n")
     with open(os.path.join(root, "chapters", "ch-01.md"), "w", encoding="utf-8") as f:
         f.write(chapter_text)
+    for fn, text in (extra_chapters or {}).items():
+        with open(os.path.join(root, "chapters", fn), "w", encoding="utf-8") as f:
+            f.write(text)
     if style_filled:
         for rel, text in STYLE_DOCS.items():
             p = os.path.join(root, rel)
@@ -212,3 +222,107 @@ class TestExitCodeContract(GateTestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestSensitiveCheck(GateTestCase):
+    """B-47：平台敏感词闸门。★最要紧的是「词表没配 = 未生效」不许长得像「扫过且干净」。"""
+
+    def test_no_word_list_is_explicitly_not_effective(self):
+        make_book(self.root)
+        code, payload, err = run_gate("sensitive_check", self.root)
+        self.assertEqual(code, 0, "未生效是**结论**，不是执行失败")
+        self.assertEqual(payload["findings"], [], "没词表当然没发现")
+        # ★关键：空的 findings 必须伴随 not_effective，否则读的人会以为「扫过且干净」
+        self.assertEqual(payload.get("not_effective"), ["sensitive"])
+        self.assertIn("未配置词表路径", payload.get("not_effective_reason", ""))
+        self.assertIn("未生效", err)
+        self.assertIn("不是「没有敏感词」，是「没扫」", err)
+
+    def test_missing_word_file_is_not_effective_with_reason(self):
+        make_book(self.root, extra_cfg={"checks": {"sensitive": {"words": ".soloent/不存在的词表.txt"}}})
+        code, payload, _ = run_gate("sensitive_check", self.root)
+        self.assertEqual(code, 0)
+        self.assertEqual(payload.get("not_effective"), ["sensitive"])
+        self.assertIn("不存在", payload.get("not_effective_reason", ""))
+
+    def test_hit_reports_severity_and_line(self):
+        make_book(self.root, chapter_text="# 第1章 测试\n\n他掏出那把管制刀具。\n\n雨还在下。\n",
+                  extra_cfg={"checks": {"sensitive": {"words": ".soloent/词表.txt"}}})
+        with open(os.path.join(self.root, ".soloent", "词表.txt"), "w", encoding="utf-8") as f:
+            f.write("# 平台红线\n\n管制刀具\n")
+        code, payload, _ = run_gate("sensitive_check", self.root)
+        self.assertEqual(code, 0, "发现问题也返回 0")
+        self.assertEqual(len(payload["findings"]), 1)
+        f0 = payload["findings"][0]
+        self.assertEqual(f0["severity"], "严重", "平台红线默认硬拦截")
+        self.assertEqual(f0["chapter"], "ch-01.md")
+        self.assertEqual(f0["line"], 3, "要给出行号供人工定位")
+        self.assertIn("管制刀具", f0["check"])
+        self.assertNotIn("not_effective", payload, "词表配好时不该有未生效标记")
+
+    def test_clean_chapter_with_word_list_has_no_marker(self):
+        """反例的反例：有词表、没命中 → 真的干净（**没有** not_effective）。"""
+        make_book(self.root, extra_cfg={"checks": {"sensitive": {"words": ".soloent/词表.txt"}}})
+        with open(os.path.join(self.root, ".soloent", "词表.txt"), "w", encoding="utf-8") as f:
+            f.write("管制刀具\n")
+        code, payload, _ = run_gate("sensitive_check", self.root)
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["findings"], [])
+        self.assertNotIn("not_effective", payload)
+
+    def test_empty_word_list_is_not_effective(self):
+        """词表存在但只有注释 → 同样是「没扫」，不是「干净」。"""
+        make_book(self.root, extra_cfg={"checks": {"sensitive": {"words": ".soloent/词表.txt"}}})
+        with open(os.path.join(self.root, ".soloent", "词表.txt"), "w", encoding="utf-8") as f:
+            f.write("# 只有注释\n\n")
+        _, payload, _ = run_gate("sensitive_check", self.root)
+        self.assertEqual(payload.get("not_effective"), ["sensitive"])
+        self.assertIn("是空的", payload.get("not_effective_reason", ""))
+
+
+class TestDuplicateCheck(GateTestCase):
+    """B-46：章内/跨章重复。两类判据各一正一反。"""
+
+    def test_cross_chapter_duplicate_sentence_is_reported(self):
+        dup = "山风从谷口灌进来，吹得满坡的野草伏成一片。"
+        make_book(self.root, chapter_text=f"# 第1章 测试\n\n{dup}\n",
+                  extra_chapters={"ch-02.md": f"# 第2章 测试\n\n他停下脚步。\n\n{dup}\n"})
+        code, payload, _ = run_gate("duplicate_check", self.root)
+        self.assertEqual(code, 0)
+        hits = [f for f in payload["findings"] if "跨章重复句" in f["check"]]
+        self.assertEqual(len(hits), 1, "同一句跨两章应报一条")
+        self.assertEqual(hits[0]["severity"], "中等")
+        self.assertEqual(hits[0]["chapter"], "ch-02.md", "报在后出现的那一章（先读到的不算问题）")
+        self.assertIn("第 1 章、第 2 章", hits[0]["check"])
+
+    def test_short_sentence_repeat_is_not_reported(self):
+        """短句重复是正常的（「他点了点头。」）——长度下限就是为它设的。"""
+        make_book(self.root, chapter_text="# 第1章 测试\n\n他点了点头。\n",
+                  extra_chapters={"ch-02.md": "# 第2章 测试\n\n他点了点头。\n"})
+        _, payload, _ = run_gate("duplicate_check", self.root)
+        self.assertEqual([f for f in payload["findings"] if "跨章重复句" in f["check"]], [])
+
+    def test_within_chapter_phrase_repeat_is_reported(self):
+        # 4 份：10 字窗口要跨过 7 字单元的边界才重复，3 份只能凑出 2 次（不到 min_repeat=3）
+        make_book(self.root, chapter_text="# 第1章 测试\n\n" + "他缓缓抬起头。".join(["", "", "", "", ""]) + "\n")
+        code, payload, _ = run_gate("duplicate_check", self.root)
+        self.assertEqual(code, 0)
+        hits = [f for f in payload["findings"] if "章内重复" in f["check"]]
+        self.assertGreater(len(hits), 0, "同一短语在本章出现 3 次以上应报")
+        self.assertEqual(hits[0]["severity"], "轻微", "排比/口头禅也可能触发 → 只报线索")
+
+    def test_plain_text_is_clean(self):
+        make_book(self.root, chapter_text=PLAIN_TEXT)
+        code, payload, _ = run_gate("duplicate_check", self.root)
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["findings"], [], "平实正文不该被误报")
+
+    def test_config_overrides_defaults(self):
+        """把阈值调高到不可能触发 → 同一个夹具不再报（证明配置真的被读）。"""
+        dup = "山风从谷口灌进来，吹得满坡的野草伏成一片。"
+        make_book(self.root, chapter_text=f"# 第1章 测试\n\n{dup}\n",
+                  extra_chapters={"ch-02.md": f"# 第2章 测试\n\n{dup}\n"},
+                  extra_cfg={"checks": {"duplicate": {"min_sentence_chars": 999}}})
+        _, payload, _ = run_gate("duplicate_check", self.root)
+        self.assertEqual([f for f in payload["findings"] if "跨章重复句" in f["check"]], [],
+                         "阈值调到 999 后不该再报——配置没被读的话这里会红")
