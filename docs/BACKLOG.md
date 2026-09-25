@@ -7,6 +7,14 @@
 
 （空）
 
+## 由 B-11 拆出的后续项
+
+| # | 内容 | 暂缓原因 | 依赖 |
+|---|---|---|---|
+| B-63 | Judge 结论与 `gateStatus` 的合并语义（当前分开落盘，怎么合起来判「能否提交」未定） | **偏离了 v0.2 M11「写入 gateStatus」**：`applyGateResult` 是全量覆写，并进去会被下一次机械 gate 静默冲掉；且 M10.5 说两者不查同一项，压成一个 worst 会丢信息。详见 docs/26 §3。需作者裁定 | B-12 |
+| B-64 | Judge 假红率标定：对《高武》已写章跑一遍，人工抽查原 16 条词面红灯（P0-1 验收：假红率 < 20%） | 需真调模型、需人工抽查；标定完才知道能否把 `fail` 从「中等」升格为常规拦截 | — |
+| B-65 | `judgeChapter` 的 LLM 路径确定性测试（当前只测了纯函数 `evaluateCriteria`） | 需录制回放，否则每跑一次都要真调模型 | B-26 |
+
 ## 由 B-10 拆出的后续项
 
 | # | 内容 | 暂缓原因 | 依赖 |
@@ -30,8 +38,7 @@
 
 | # | 内容 | 来源 | 暂缓原因 | 依赖 |
 |---|---|---|---|---|
-| B-11 | 语义判据层 Judge：J1 蓝图契约 / J2 章末钩子 / J3 连续性，证据引句防幻觉 | v0.2 M11、docs/24 P0-1 | 工作量 2–3 天 | — |
-| B-12 | 收敛循环改为「定点修订 ≤2 → 整章重写 ≤1 → 停下等人」，修订按 quote 局部重写 | v0.2 M12.2 | 依赖 Judge | B-11 |
+| B-12 | 收敛循环改为「定点修订 ≤2 → 整章重写 ≤1 → 停下等人」，修订按 quote 局部重写 | v0.2 M12.2 | 依赖已满足（B-11 已落地）；合并语义见 B-63 | B-11 ✓ |
 | B-13 | schema v2：gateStatus 指纹 mtime→contentHash、needsReview、修订计数、generatedBy | v0.2 §2、M1.3 | 需迁移脚本 | — |
 | B-14 | Gates 退出码语义统一（exit 只表示脚本是否崩溃，结论看 JSON） | v0.2 §0 #3 | 需同步改 Python 检查器 | — |
 | B-15 | CLI 子进程冒烟测试；Python gates 的 pytest 固件 | docs/24 P2 | — | — |
@@ -93,8 +100,9 @@
 | B-01 | 当前状态卡：`buildPrompt` draft 模式追加 `now.md`（读 `book.json` 的 `paths.now`，缺省 `.soloent/memory/now.md`；上限 3000 码点；文件缺失或仍是「（待填）」占位则不注入）；`summarize --state-card` 产出建议到 `state/now.proposed.md`，**绝不覆盖 `now.md`**，作者手工合并 | 2026-09-25 · 6ba2813 |
 | B-02 | 相关摘要检索关键词 = 上一章末尾 ∪ 本章细纲全文 bigram（`assembleLongContext` 第 4 参 `outlineText`） | 2026-09-25 · 6ba2813 |
 | B-10 | 逐层递进建书（定位 → 设定 → 总纲 → 卷纲 → 细纲）+ 每层确认闸门；`novel plan init/status/position/draft/confirm`；`assertPlanReady` 接进 generate/book/CLI write/server `/write`·`/generate`·`/preflight`。顺带修掉 CLI `novel write` **一道门都没有**的旁路。未开启逐层流程的书恒为就绪（旧书不连坐） | 2026-09-25 · a73bd75 |
+| B-11 | 语义判据层 Judge（J1 蓝图契约 / J2 章末钩子 / J3 连续性）：证据引句命不中即降 `unsure`（防幻觉，原判留 `rawVerdict`）；判据定义在 `.soloent/judges/`、`book.json` 的 `judges.enabled` 显式声明（未声明 → 显式报错，不退化成「0 条 = 全绿」）；`novel judge --chapter N [--advisory] [--write]` + `--list/--scaffold/--status`；结论落 `state/judge.json`（绑 mtime，过期即作废）。详见 `docs/26` | 2026-09-25 · 4605a54 |
 
 > 随 B-01/B-02 一并修掉的基建缺陷：`packages/core` 的 `test` 脚本是**硬编码文件清单**，
 > 新增的 `test/memory-context.test.ts` 没被登记 → 实际只跑 55 项，B-01/B-02 的 4 项测试
 > 从未执行过。已改为 `"test/**/*.test.ts"`。（此类「测试在但不跑」的坑与 B-15「测试基建」
-> 同类，登记为教训。）当前全量：**71 项全绿**。
+> 同类，登记为教训。）当前全量：**86 项全绿**。
