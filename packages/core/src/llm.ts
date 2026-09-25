@@ -33,7 +33,18 @@ export function modelFor(purpose: LlmPurpose, explicit?: string): string {
   return resolveModelFor(purpose, explicit);
 }
 
-const TIMEOUT_MS = 60_000;
+/**
+ * 单次调用超时（毫秒）。**可配**（`NOVEL_LLM_TIMEOUT_MS`）。
+ *
+ * 为什么必须可配：默认 60s 对「整章抽取 / 起草」这种长输出调用太紧——
+ * 真书第 34 章抽取实测在商汤网关上被 60s 掐断（2026-09-25）。
+ * 短平快的判据/摘要调用 60s 足够，但阈值是**作者的网络与模型口味**，
+ * 写死就只有改源码一条路（B-68 同一条裁定）。
+ */
+const TIMEOUT_MS = (() => {
+  const raw = Number(process.env['NOVEL_LLM_TIMEOUT_MS'] ?? '');
+  return Number.isFinite(raw) && raw > 0 ? raw : 120_000;
+})();
 const RETRY_DELAY_MS = 1_000;
 
 /**
