@@ -2,7 +2,7 @@ import { rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildPrompt } from './prompt.js';
 import { callLLM, type CallLLMOptions } from './llm.js';
-import { applyGateResult, BLOCKING_SEVERITIES, readState, snapshotChapterHashes, writeState } from './state.js';
+import { applyGateResult, BLOCKING_SEVERITIES, isPassingWorst, readState, snapshotChapterHashes, writeState } from './state.js';
 import { runGates } from './gates.js';
 import { judgeChapter, JudgesNotDeclared, writeJudgeStatus } from './judges.js';
 import { reviseByQuote } from './revise.js';
@@ -152,6 +152,34 @@ export interface ConvergeResult {
    * 追问都只能靠推演。
    */
   llmCalls: number;
+}
+
+/**
+ * 自检：`stopped` 与 `finalWorst` 是**同一件事的两种说法**，必须对得上。
+ *
+ * 两者词汇不同：`stopped` 是收敛循环的终态，`finalWorst` 是机械 gates 回填的严重度。
+ * 单向蕴含必须成立——**若声称「过闸了」，机械 gates 就不能还有拦截级**。
+ *
+ * 为什么只做单向：反向不成立，也不该成立。`stopped: 'human-needed'` 配
+ * `finalWorst: 'clean'` 是**正常**的——拦截级问题可能全部来自语义判据
+ * （judge 的结论不进 gateStatus，两者不查同一项）。
+ *
+ * 为什么值得做（B-66 顺带发现）：B-12 之后 `isPassingWorst` 在 apps/ 里没有调用者了，
+ * 「过闸判据只允许一个来源」这条规矩就只剩一句注释。**一个存在但没人用的谓词，
+ * 正是 F18（那条永远走不到的 stop 分支）的成因**——接成自检之后它重新变成活的。
+ */
+function assertStoppedConsistent(
+  stopped: ConvergeResult['stopped'],
+  finalWorst: string,
+): ConvergeResult['stopped'] {
+  const claimsPass = stopped === 'clean' || stopped === 'clean-advisory';
+  if (claimsPass && !isPassingWorst(finalWorst)) {
+    throw new Error(
+      `收敛结果自相矛盾：stopped=${stopped}（声称过闸），但机械 gates 的 worst=${finalWorst}（拦截级）。\n`
+        + '  两者是同一件事的两种说法，对不上说明回填或聚合有 bug——不能猜一个语义放过去。',
+    );
+  }
+  return stopped;
 }
 
 /**
@@ -439,7 +467,7 @@ export async function convergeChapter(o: ConvergeOptions): Promise<ConvergeResul
     drafted,
     rounds,
     finalWorst,
-    stopped,
+    stopped: assertStoppedConsistent(stopped, finalWorst),
     ...(handoff !== undefined ? { handoff } : {}),
     judge: judgeState,
     llmCalls,
