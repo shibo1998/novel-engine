@@ -77,6 +77,7 @@ export LLM_MODEL=your-model
 | `NOVEL_LLM_BREAKER_THRESHOLD` | `3` | 连续失败几次后熔断 |
 | `NOVEL_LLM_BREAKER_COOLDOWN_MS` | `60000` | 熔断后冷却多久 |
 | `NOVEL_GATE_TIMEOUT_MS` | `4000` | 检查器子进程超时 |
+| `NOVEL_LLM_MAX_TOKENS` / 配置文件 `maxTokens` | 不发送 | 输出预算。★推理模型（deepseek 系）的 reasoning 计入预算：网关默认 8192 可能被思考耗光、content 为空——遇到就配一个大值（如 32768）或换非推理模型 |
 | `NOVEL_LLM_RECORD_DIR` | — | 录像：把每次请求/响应脱敏落盘 |
 | `NOVEL_LLM_REPLAY_DIR` | — | 回放：不碰网络，按请求指纹取录制结果（**离线确定性测试**用） |
 | `NOVEL_PYTHON` | `python` | 检查器用的 Python 解释器 |
