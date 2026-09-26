@@ -258,16 +258,41 @@ export async function callLLM(b: PromptBundle, o: CallLLMOptions = {}): Promise<
         const bodyText = await res.text().catch(() => '');
         return { ok: false, kind: 'http', status: res.status, detail: bodyText.slice(0, 200) };
       }
+      let bodyText = '';
+      try {
+        bodyText = await res.text();
+      } catch {
+        bodyText = '';
+      }
       let j: unknown;
       try {
-        j = await res.json();
+        j = JSON.parse(bodyText);
       } catch {
-        return { ok: false, kind: 'parse', detail: '响应体不是合法 JSON' };
+        // ★响应体不是 JSON：可能是网关的 HTML 错误页、SSE 流、或被截断的响应。
+        // 不带出原文就没法诊断（本仓在真书上实测遇到过，且每次报错都长得一样）。
+        return { ok: false, kind: 'parse', detail: `响应体不是合法 JSON（前 200 字：${bodyText.slice(0, 200) || '(空)'}）` };
       }
-      const content = (j as { choices?: { message?: { content?: unknown } }[] })
-        .choices?.[0]?.message?.content;
+      const shape = j as {
+        choices?: { message?: { content?: unknown; reasoning_content?: unknown }; finish_reason?: unknown }[];
+        usage?: { completion_tokens_details?: { reasoning_tokens?: unknown } };
+      };
+      const msg = shape.choices?.[0]?.message;
+      const content = msg?.content;
       if (typeof content !== 'string' || content === '') {
-        return { ok: false, kind: 'parse', detail: 'choices[0].message.content 缺失或为空' };
+        // ★失败也要带诊断信息：空 content 的最常见根因是**推理模型把输出预算
+        // 全花在 reasoning 上**（finish=length、reasoning_tokens 吃满），
+        // 只报「content 为空」会让人往提示词方向排查，白绕一大圈。
+        const reasoningLen = typeof msg?.reasoning_content === 'string' ? msg.reasoning_content.length : 0;
+        const rt = shape.usage?.completion_tokens_details?.reasoning_tokens;
+        return {
+          ok: false,
+          kind: 'parse',
+          detail: `choices[0].message.content 缺失或为空`
+            + `（finish_reason=${JSON.stringify(shape.choices?.[0]?.finish_reason ?? null)}`
+            + `｜reasoning_content ${reasoningLen} 字符`
+            + `｜reasoning_tokens=${String(rt ?? '未报')}`
+            + `——若是推理模型耗光输出预算：配大 maxTokens 或换非推理模型）`,
+        };
       }
       // 录像（B-26）：只存 model / prompt / 响应文本，**绝不写 Authorization**
       const recordDir = process.env['NOVEL_LLM_RECORD_DIR'];
