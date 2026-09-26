@@ -154,3 +154,20 @@ export function configNumber(key: string): number | undefined {
   const n = typeof v === 'number' ? v : (typeof v === 'string' ? Number(v) : NaN);
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
+
+/**
+ * 解析 `max_tokens`：显式 > env `NOVEL_LLM_MAX_TOKENS` > 配置文件 `maxTokens` > 不发送。
+ *
+ * ★**为什么「不发送」必须是默认**：推理模型（deepseek 系）会把输出预算大量花在
+ * 思考上——商汤网关对未指定 max_tokens 的请求默认 8192，实测推理耗光预算后
+ * `content` 为空、`finish_reason=length`（2026-09-25 高武第 34 章实锤）。
+ * 但解法**不是**默认发一个大值：不发送时网关有自己的处理。
+ * 调用方（extract 等长输出）真需要时由配置显式给；更省心的替代是
+ * 换非推理/预算充足的模型做抽取（配置 `models.extract`）。
+ */
+export function resolveMaxTokens(explicit?: number): number | undefined {
+  if (explicit !== undefined && explicit > 0) return explicit;
+  const env = Number(process.env['NOVEL_LLM_MAX_TOKENS'] ?? '');
+  if (Number.isFinite(env) && env > 0) return env;
+  return configNumber('maxTokens');
+}

@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { contentHash } from './hash.js';
 import type { LLMError, LLMResult, PromptBundle } from './types.js';
-import { configNumber, resolveLlmSetting, resolveModelFor } from './llmconfig.js';
+import { configNumber, resolveLlmSetting, resolveMaxTokens, resolveModelFor } from './llmconfig.js';
 
 export interface CallLLMOptions {
   temperature?: number;
@@ -238,7 +238,7 @@ export async function callLLM(b: PromptBundle, o: CallLLMOptions = {}): Promise<
             { role: 'user', content: b.user },
           ],
           ...(o.temperature !== undefined ? { temperature: o.temperature } : {}),
-          ...(o.maxTokens !== undefined ? { max_tokens: o.maxTokens } : {}),
+          ...(resolveMaxTokens(o.maxTokens) !== undefined ? { max_tokens: resolveMaxTokens(o.maxTokens) } : {}),
         }),
       });
       if (!res.ok) {
