@@ -34,20 +34,24 @@ export function modelFor(purpose: LlmPurpose, explicit?: string): string {
 }
 
 /**
- * 单次调用超时（毫秒）。**可配**（`NOVEL_LLM_TIMEOUT_MS`）。
+ * 单次调用超时（毫秒）。**可配**（`NOVEL_LLM_TIMEOUT_MS` 或配置文件 `timeoutMs`）。
  *
  * 为什么必须可配：默认 60s 对「整章抽取 / 起草」这种长输出调用太紧——
  * 真书第 34 章抽取实测在商汤网关上被 60s 掐断（2026-09-25）。
- * 短平快的判据/摘要调用 60s 足够，但阈值是**作者的网络与模型口味**，
- * 写死就只有改源码一条路（B-68 同一条裁定）。
+ *
+ * ★**必须是函数，不能是模块级常量**：`const TIMEOUT_MS = (() => configNumber(...))()`
+ * 会在**模块加载时**读一次配置并（经由 llmconfig 的缓存）把作者的真实配置
+ * 钉进进程——测试里 `NOVEL_CONFIG_FILE` 是在 withEnv 里才设置的，晚于模块加载，
+ * 于是所有测试都拿到了作者磁盘上的真配置（本文件测试当场抓到：
+ * 断言 model==='m' 实得 'glm-5.2'）。**模块加载期副作用读配置 = 测试顺序依赖。**
+ * readConfig 自带缓存，这里每次调用求值的成本是一次 Map 查询。
  */
-const TIMEOUT_MS = (() => {
+function timeoutMs(): number {
   const raw = Number(process.env['NOVEL_LLM_TIMEOUT_MS'] ?? '');
   if (Number.isFinite(raw) && raw > 0) return raw;
-  // 配置文件也认（作者可能不想用 env）：`timeoutMs`，毫秒
   const fromFile = configNumber('timeoutMs');
   return fromFile !== undefined ? fromFile : 120_000;
-})();
+}
 const RETRY_DELAY_MS = 1_000;
 
 /**
@@ -59,12 +63,21 @@ const RETRY_DELAY_MS = 1_000;
  * env 可设 0 关掉这一层（自测/离线场景）。
  */
 function retryAttempts(): number {
-  const raw = Number(process.env['NOVEL_LLM_RETRY_ATTEMPTS'] ?? '');
+  // ★**不能**写 `Number(env ?? '')`：env 未设置时 `?? ''` 得到空串，`Number('') === 0`，
+  // 于是「未设置」被当成显式的 0——文档承诺的默认 1 从未生效（2026-09-25 真书
+  // 抽取实测抓到：熔断 1 次就开、0s 冷却，全是同一根因）。
+  // 判「未设置」要看 undefined / 空白，而不是 ?? ''。
+  const v = process.env['NOVEL_LLM_RETRY_ATTEMPTS'];
+  if (v === undefined || v.trim() === '') return 1;
+  const raw = Number(v);
   return Number.isFinite(raw) && raw >= 0 ? raw : 1;
 }
 
 function numEnv(name: string, fallback: number): number {
-  const raw = Number(process.env[name] ?? '');
+  // 同上：`?? ''` 会把「未设置」变成 0（阈值 0 = 第 1 次失败就熔断、冷却 0s）。
+  const v = process.env[name];
+  if (v === undefined || v.trim() === '') return fallback;
+  const raw = Number(v);
   return Number.isFinite(raw) && raw >= 0 ? raw : fallback;
 }
 
@@ -220,7 +233,7 @@ export async function callLLM(b: PromptBundle, o: CallLLMOptions = {}): Promise<
   const attempt = async (): Promise<LLMResult> => {
     const ctrl = new AbortController();
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, TIMEOUT_MS);
+    const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, timeoutMs());
     const onExternalAbort = (): void => ctrl.abort();
     if (o.signal !== undefined) {
       if (o.signal.aborted) ctrl.abort();

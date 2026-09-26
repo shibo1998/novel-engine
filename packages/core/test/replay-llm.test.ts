@@ -165,3 +165,55 @@ test('指纹就是 contentHash(system+user+model)，可独立复算（夹具可�
   const h = contentHash('m\n\u0000\nsys\n\u0000\nusr');
   assert.equal(h.length, 16, '与 gateStatus 用同一套指纹口径');
 });
+
+// ── B-31 附带发现：numEnv 的 `?? ''` 把「未设置」当成 0 ──────────────────────
+// 真书抽取实测抓到：熔断 1 次就开（阈值应为 3）、0s 冷却（应为 60s）。
+// 根因是 `Number(env ?? '')`——env 未设置时空串被 Number 成 0，文档默认值从未生效。
+// 本文件下面的用例之所以没暴露，是因为全都显式设了 RETRY_ATTEMPTS:'0'——
+// **所有测试都绕过默认路径，默认路径就成了没有测试的荒地**。
+
+test('★重试默认 1 次：env 未设置时文档值生效，而不是 0', async () => {
+  let requests = 0;
+  const srv = createServer((_req, res) => {
+    requests += 1;
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: { message: 'boom' } }));
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+  const addr = srv.address();
+  const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
+  try {
+    await withEnv({ LLM_BASE_URL: `http://127.0.0.1:${port}`, LLM_API_KEY: 'k', LLM_MODEL: 'm' }, async () => {
+      const r = await callLLM(BUNDLE, { temperature: 0.2 });
+      assert.equal(r.ok, false);
+      // ★1 次初始 + 1 次重试 = 2 次请求。旧 bug 下是 1（默认被当成 0，从不重试）
+      assert.equal(requests, 2, `env 未设置时应按默认重试 1 次（共 2 次请求），实际 ${requests}`);
+    });
+  } finally {
+    srv.close();
+  }
+});
+
+test('★熔断默认阈值 3：env 未设置时第 3 次连续失败才开，冷却 60s', async () => {
+  let requests = 0;
+  const srv = createServer((_req, res) => {
+    requests += 1;
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: { message: 'boom' } }));
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+  const addr = srv.address();
+  const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
+  try {
+    await withEnv({ LLM_BASE_URL: `http://127.0.0.1:${port}`, LLM_API_KEY: 'k', LLM_MODEL: 'm' }, async () => {
+      // 每次调用 = 1 初始 + 1 重试 = 2 请求；3 次调用共 6 请求后熔断开
+      for (let i = 0; i < 3; i++) await callLLM(BUNDLE, { temperature: 0.2 });
+      assert.ok(requests >= 6, `三次失败应各含重试（至少 6 请求），实际 ${requests}`);
+      const r4 = await callLLM(BUNDLE, { temperature: 0.2 });
+      assert.equal(r4.ok, false);
+      assert.equal(r4.ok === false && 'kind' in r4 ? r4.kind : '', 'circuit-open', '第 4 次应被熔断拦截');
+    });
+  } finally {
+    srv.close();
+  }
+});
